@@ -1,1 +1,13 @@
 # otter
+An open-source SBOM & vulnerability analyzer.
+It scans container images or GitHub repos, generates CycloneDX SBOMs, lists vulnerabilities, and suggests version upgrades — all in one React + Go application.
+
+1. Task: Setting up trivy server (dockerfile/docker compose) and scan the image (look also for the case)
+2. Task: Setting up the postresql and how to store the sbom or other things (read it and store)
+3. Task: github action to build everything on main branch pr merged
+4. Task: Save different things like sbom, vex, provenances, cve (with the fixes details)
+5. Task: add the open source project scan (+ task 4)
+6. Task: add integration for different oci registry like ghrc, docker private (i mean for pvt)
+7. Task: Minimal UI + export option (different view or render options)
+---
+8. Look for the attestation if possible or for the compilances ?
