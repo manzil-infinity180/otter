@@ -8,3 +8,8 @@ example:
 
 
 ```
+
+```
+// sbom to vulnerability (json)
+grype -o json sbom:go-cyclonedx.json > hello.json 
+```
