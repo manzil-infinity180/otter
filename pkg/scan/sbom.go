@@ -23,12 +23,12 @@ import (
 
 const defaultImage = "manzilrahul/k8s-custom-controller:latest"
 
-func ImageReference() string {
+func ImageReference(name string) string {
 	// read an image string reference from the command line or use a default
-	if len(os.Args) > 1 {
-		return os.Args[1]
-	}
-	return defaultImage
+	//if len(os.Args) > 1 {
+	//	return os.Args[1]
+	//}
+	return name
 }
 
 func GetSource(input string) source.Source {
@@ -39,8 +39,48 @@ func GetSource(input string) source.Source {
 
 	return src
 }
+func GetSBOM(src source.Source, defaultTags ...string) *sbom.SBOM {
+	// cfg := syft.DefaultCreateSBOMConfig().
+	// 	WithCatalogerSelection(
+	// 		// here you can sub-select, add, remove catalogers from the default selection...
+	// 		// or replace the default selection entirely!
+	// 		cataloging.NewSelectionRequest().
+	// 			WithDefaults(defaultTags...),
+	// 	)
 
-func GetSBOM(src source.Source, defaultTags ...string) sbom.SBOM {
+	cfg := syft.DefaultCreateSBOMConfig()
+
+	s, err := syft.CreateSBOM(context.Background(), src, cfg)
+	if err != nil {
+		panic(err)
+	}
+
+	// r, err := ToSpdxSchema(s)
+	//r, err := ToCycloneDxSchema(s)
+	//if err != nil {
+	//	panic(err)
+	//}
+
+	//filePath := "go-spdx.json"
+	//file, err := os.Create(filePath) // os.Create truncates if file exists
+	//if err != nil {
+	//	fmt.Printf("Error creating file: %v\n", err)
+	//	panic(err)
+	//}
+	//defer func() {
+	//	if err := file.Close(); err != nil {
+	//		log.Printf("failed to close file: %v", err)
+	//	}
+	//}()
+	//
+	//_, err = io.Copy(file, r)
+	//if err != nil {
+	//	fmt.Printf("Error copying content: %v\n", err)
+	//	panic(err)
+	//}
+	return s
+}
+func GetSBOMData(src source.Source, defaultTags ...string) sbom.SBOM {
 	// cfg := syft.DefaultCreateSBOMConfig().
 	// 	WithCatalogerSelection(
 	// 		// here you can sub-select, add, remove catalogers from the default selection...
