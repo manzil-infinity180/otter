@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"time"
 
@@ -67,7 +68,11 @@ func GetSBOM(src source.Source, defaultTags ...string) sbom.SBOM {
 		fmt.Printf("Error creating file: %v\n", err)
 		panic(err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}()
 
 	_, err = io.Copy(file, r)
 	if err != nil {
@@ -116,7 +121,11 @@ func GetSBOM(src source.Source, defaultTags ...string) sbom.SBOM {
 	if err != nil {
 		panic(err)
 	}
-	defer vulnFile.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}()
 
 	// Create structured output
 	type VulnOutput struct {

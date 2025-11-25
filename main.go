@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+
 	"github.com/anchore/syft/syft/cataloging/pkgcataloging"
 	"github.com/otterXf/otter/pkg/scan"
 	// _ "modernc.org/sqlite" // required for rpmdb and other features
@@ -9,7 +11,11 @@ import (
 func main() {
 	// automagically get a source.Source for arbitrary string input
 	src := scan.GetSource(scan.ImageReference())
-	defer src.Close()
+	defer func() {
+		if err := src.Close(); err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}()
 
 	// catalog the given source and return a SBOM
 	// let's explicitly use catalogers that are:

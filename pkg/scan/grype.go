@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -111,7 +112,9 @@ func NewScanner(opts Options) (*Scanner, error) {
 	updateDB := true
 	var checksum string
 	if dbArchivePath := opts.PathOfDatabaseArchiveToImport; dbArchivePath != "" {
-		fmt.Fprintf(os.Stderr, "using local grype DB archive %q...\n", dbArchivePath)
+		if _, err := fmt.Fprintf(os.Stdout, "WARNING: ..."); err != nil {
+			log.Printf("failed to write warning: %v", err)
+		}
 		dbCurator, err := installation.NewCurator(installCfg, distClient)
 		if err != nil {
 			return nil, fmt.Errorf("unable to create the grype db import config: %w", err)
@@ -123,7 +126,11 @@ func NewScanner(opts Options) (*Scanner, error) {
 		if err != nil {
 			return nil, fmt.Errorf("opening vulnerability database archive for hashing: %w", err)
 		}
-		defer f.Close()
+		defer func() {
+			if err := f.Close(); err != nil {
+				log.Printf("failed to close file: %v", err)
+			}
+		}()
 		if _, err := io.Copy(h, f); err != nil {
 			return nil, fmt.Errorf("hashing vulnerability database archive: %w", err)
 		}
@@ -146,7 +153,9 @@ func NewScanner(opts Options) (*Scanner, error) {
 	now := time.Now().UTC()
 	age := now.Sub(dbStatus.Built)
 	if age > maxRecommendedBuildAge {
-		fmt.Fprintf(os.Stdout, "WARNING: the vulnerability database was built %s ago (max allowed age is %s but the recommended value is %s)\n", durafmt.ParseShort(age), durafmt.ParseShort(maxAllowedBuildAge), durafmt.ParseShort(maxRecommendedBuildAge))
+		if _, err := fmt.Fprintf(os.Stdout, "WARNING: the vulnerability database was built %s ago (max allowed age is %s but the recommended value is %s)\n", durafmt.ParseShort(age), durafmt.ParseShort(maxAllowedBuildAge), durafmt.ParseShort(maxRecommendedBuildAge)); err != nil {
+			log.Printf("failed to write warning: %v", err)
+		}
 	}
 
 	if checksum == "" {

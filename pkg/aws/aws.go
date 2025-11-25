@@ -79,7 +79,11 @@ func (bucket BucketBasics) UploadFile(ctx context.Context, bucketName string, ob
 	if err != nil {
 		log.Printf("Couldn't open file %v to upload. Here's why: %v\n", fileName, err)
 	} else {
-		defer file.Close()
+		defer func() {
+			if err := file.Close(); err != nil {
+				log.Printf("failed to close file: %v", err)
+			}
+		}()
 		_, err := bucket.S3Client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket: aws.String(bucketName),
 			Key:    aws.String(objectKey),
@@ -122,13 +126,21 @@ func (bucket BucketBasics) DownloadFile(ctx context.Context, bucketName string, 
 		}
 		return err
 	}
-	defer result.Body.Close()
+	defer func() {
+		if err := result.Body.Close(); err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}()
 	file, err := os.Create(fileName)
 	if err != nil {
 		log.Printf("Couldn't create file %v. Here's why: %v\n", fileName, err)
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}()
 	// we care about the result.Body , don't need to save it to another file
 	body, err := io.ReadAll(result.Body)
 	if err != nil {
