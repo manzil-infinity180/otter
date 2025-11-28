@@ -1,0 +1,6 @@
+
+*.pem
+*.env
+bin
+*.json
+*.idea

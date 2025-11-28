@@ -44,7 +44,7 @@ permissions:
   contents: read
 
 jobs:
-  witness:
+  otter:
     runs-on: ubuntu-latest
     permissions:
       contents: read
