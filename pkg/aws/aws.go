@@ -19,6 +19,23 @@ type BucketBasics struct {
 	S3Client *s3.Client
 }
 
+func (basics BucketBasics) GetPresignedURL(ctx context.Context, bucketName, key string, expiration time.Duration) (string, error) {
+	presignClient := s3.NewPresignClient(basics.S3Client)
+
+	request, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = expiration
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	return request.URL, nil
+}
+
 // BucketExists checks whether a bucket exists in the current account.
 func (bucket BucketBasics) BucketExists(ctx context.Context, bucketName string) (bool, error) {
 

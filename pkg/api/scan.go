@@ -3,10 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/otterXf/otter/pkg/aws"
@@ -35,7 +35,7 @@ func NewScanHandler(s3Client aws.BucketBasics, bucketName string) *ScanHandler {
 	}
 }
 
-// GenerateScanSbomVul generates SBOM and uploads to S3
+// GenerateScanSbomVul generates SBOM, scans for vulnerabilities, and uploads both to S3
 func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 	var payload ImageGeneratePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -61,64 +61,84 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		}
 	}()
 
+	// ==================== SBOM Generation ====================
 	sbom := scan.GetSBOM(src)
-	cyclonedxFormatSbom, err := scan.ToCycloneDxSchema(sbom)
-	if err != nil {
+
+	// Save SBOM to file
+	sbomFilePath := "sbom.json"
+	if err := scan.SaveSBOMToFile(sbom, sbomFilePath); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("failed to convert the sbom to cyclonedx-json format: %v", err),
+			"error": fmt.Sprintf("Failed to save SBOM: %v", err),
+		})
+		return
+	}
+	defer os.Remove(sbomFilePath)
+
+	// ==================== Vulnerability Scan ====================
+	vulnFilePath, err := scan.GetAllVulnAndUpload(sbom)
+	if err != nil {
+		os.Remove(sbomFilePath)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to generate vulnerabilities: %v", err),
 		})
 		return
 	}
 
-	// Create temporary file for SBOM
-	filePath := "sbom.json"
-	file, err := os.Create(filePath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Error creating file: %v", err),
-		})
-		return
-	}
-
-	// Copy SBOM content to file
-	_, err = io.Copy(file, cyclonedxFormatSbom)
-	if err != nil {
-		file.Close()
-		os.Remove(filePath)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Error copying content: %v", err),
-		})
-		return
-	}
-	file.Close()
-
-	// Upload to S3
-	// S3 key structure: otterxf/<org_id>/<image_id>/sbom.json
-	s3Key := fmt.Sprintf("otterxf/%s/%s/sbom.json", orgID, imageID)
-
+	// ==================== Upload Both Files to S3 ====================
 	ctx := context.Background()
-	err = h.S3Client.UploadFile(ctx, h.BucketName, s3Key, filePath)
+
+	// Upload SBOM
+	sbomS3Key := fmt.Sprintf("otterxf/%s/%s/sbom.json", orgID, imageID)
+	err = h.S3Client.UploadFile(ctx, h.BucketName, sbomS3Key, sbomFilePath)
 	if err != nil {
-		os.Remove(filePath)
+		os.Remove(sbomFilePath)
+		os.Remove(vulnFilePath)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to upload to S3: %v", err),
+			"error": fmt.Sprintf("Failed to upload SBOM to S3: %v", err),
 		})
 		return
 	}
 
-	// Clean up local file after successful upload
-	err = os.Remove(filePath)
+	// Upload Vulnerabilities
+	vulnS3Key := fmt.Sprintf("otterxf/%s/%s/vulnerabilities.json", orgID, imageID)
+	err = h.S3Client.UploadFile(ctx, h.BucketName, vulnS3Key, vulnFilePath)
 	if err != nil {
-		log.Printf("Warning: failed to delete local file %s: %v", filePath, err)
+		os.Remove(sbomFilePath)
+		os.Remove(vulnFilePath)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to upload vulnerabilities to S3: %v", err),
+		})
+		return
 	}
+
+	// ==================== Clean Up Local Files ====================
+	if err := os.Remove(sbomFilePath); err != nil {
+		log.Printf("Warning: failed to delete local SBOM file %s: %v", sbomFilePath, err)
+	}
+	if err := os.Remove(vulnFilePath); err != nil {
+		log.Printf("Warning: failed to delete local vulnerability file %s: %v", vulnFilePath, err)
+	}
+
+	// ==================== Generate Presigned URLs (Optional) ====================
+	sbomPresignedURL, _ := h.S3Client.GetPresignedURL(ctx, h.BucketName, sbomS3Key, time.Hour)
+	vulnPresignedURL, _ := h.S3Client.GetPresignedURL(ctx, h.BucketName, vulnS3Key, time.Hour)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":    "SBOM generated and uploaded successfully",
-		"s3_key":     s3Key,
-		"bucket":     h.BucketName,
+		"message":    "SBOM and vulnerabilities generated and uploaded successfully",
 		"org_id":     orgID,
 		"image_id":   imageID,
 		"image_name": payload.ImageName,
+		"bucket":     h.BucketName,
+		"files": gin.H{
+			"sbom": gin.H{
+				"s3_key":       sbomS3Key,
+				"download_url": sbomPresignedURL,
+			},
+			"vulnerabilities": gin.H{
+				"s3_key":       vulnS3Key,
+				"download_url": vulnPresignedURL,
+			},
+		},
 	})
 }
 

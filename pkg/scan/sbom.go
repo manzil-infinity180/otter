@@ -39,47 +39,96 @@ func GetSource(input string) source.Source {
 
 	return src
 }
-func GetSBOM(src source.Source, defaultTags ...string) *sbom.SBOM {
-	// cfg := syft.DefaultCreateSBOMConfig().
-	// 	WithCatalogerSelection(
-	// 		// here you can sub-select, add, remove catalogers from the default selection...
-	// 		// or replace the default selection entirely!
-	// 		cataloging.NewSelectionRequest().
-	// 			WithDefaults(defaultTags...),
-	// 	)
 
+// GetSBOM generates and returns just the SBOM object
+func GetSBOM(src source.Source, defaultTags ...string) *sbom.SBOM {
 	cfg := syft.DefaultCreateSBOMConfig()
 
-	s, err := syft.CreateSBOM(context.Background(), src, cfg)
+	sbom, err := syft.CreateSBOM(context.Background(), src, cfg)
 	if err != nil {
 		panic(err)
 	}
 
-	// r, err := ToSpdxSchema(s)
-	//r, err := ToCycloneDxSchema(s)
-	//if err != nil {
-	//	panic(err)
-	//}
-
-	//filePath := "go-spdx.json"
-	//file, err := os.Create(filePath) // os.Create truncates if file exists
-	//if err != nil {
-	//	fmt.Printf("Error creating file: %v\n", err)
-	//	panic(err)
-	//}
-	//defer func() {
-	//	if err := file.Close(); err != nil {
-	//		log.Printf("failed to close file: %v", err)
-	//	}
-	//}()
-	//
-	//_, err = io.Copy(file, r)
-	//if err != nil {
-	//	fmt.Printf("Error copying content: %v\n", err)
-	//	panic(err)
-	//}
-	return s
+	return sbom
 }
+
+// SaveSBOMToFile converts SBOM to CycloneDX format and saves to file
+func SaveSBOMToFile(sbom *sbom.SBOM, filePath string) error {
+	cyclonedxFormatSbom, err := ToCycloneDxSchema(sbom)
+	if err != nil {
+		return fmt.Errorf("failed to convert SBOM to CycloneDX format: %w", err)
+	}
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, cyclonedxFormatSbom)
+	if err != nil {
+		os.Remove(filePath)
+		return fmt.Errorf("failed to write SBOM to file: %w", err)
+	}
+
+	return nil
+}
+
+// GetAllVulnAndUpload scans for vulnerabilities and returns the file path
+func GetAllVulnAndUpload(s *sbom.SBOM) (string, error) {
+	var DefaultOptions = Options{
+		MaxAllowedBuildAge: 120 * time.Hour,
+	}
+	scanner, err := NewScanner(DefaultOptions)
+	if err != nil {
+		return "", fmt.Errorf("failed to create scanner: %w", err)
+	}
+	fmt.Println("Database built at:", scanner.dbStatus.Built)
+	fmt.Println("Database location:", scanner.dbStatus.Path)
+
+	// Convert Syft packages to Grype packages
+	syftPkgs := s.Artifacts.Packages.Sorted()
+	grypePkgs := grypePkg.FromPackages(syftPkgs, grypePkg.SynthesisConfig{
+		GenerateMissingCPEs: false,
+	})
+
+	fmt.Printf("Converted %d packages for vulnerability scanning\n", len(grypePkgs))
+
+	// Create the context for Grype
+	grypeContext := grypePkg.Context{
+		Source: &s.Source,
+		Distro: distro.FromRelease(s.Artifacts.LinuxDistribution, nil),
+	}
+
+	// Perform vulnerability matching
+	matchesCollection, ignoredMatches, err := scanner.vulnerabilityMatcher.FindMatches(grypePkgs, grypeContext)
+	if err != nil {
+		return "", fmt.Errorf("failed to find matches: %w", err)
+	}
+
+	fmt.Printf("Found %d vulnerabilities (%d ignored)\n", matchesCollection.Count(), len(ignoredMatches))
+
+	// Get sorted matches
+	matches := matchesCollection.Sorted()
+
+	// Save vulnerability results
+	vulnFilePath := "vulnerabilities.json"
+	vulnFile, err := os.Create(vulnFilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create vulnerability file: %w", err)
+	}
+	defer vulnFile.Close()
+
+	enc := json.NewEncoder(vulnFile)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(matches); err != nil {
+		return "", fmt.Errorf("failed to encode vulnerabilities: %w", err)
+	}
+
+	fmt.Printf("Vulnerabilities saved to: %s\n", vulnFilePath)
+	return vulnFilePath, nil
+}
+
 func GetSBOMData(src source.Source, defaultTags ...string) sbom.SBOM {
 	// cfg := syft.DefaultCreateSBOMConfig().
 	// 	WithCatalogerSelection(
