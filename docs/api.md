@@ -123,6 +123,31 @@ Response includes:
 
 If filters are applied, Otter also includes `summary_all` for the unfiltered record.
 
+## Get image attestations
+
+`GET /api/v1/images/:id/attestations?org_id=default_org`
+
+Behavior:
+
+- resolves the stored `image_name` from indexed scan data
+- queries OCI referrers for attached signatures and attestations
+- parses DSSE envelopes, in-toto statements, and SLSA provenance summaries
+- verifies discovered signatures with `cosign verify`
+- verifies discovered attestations with `cosign verify-attestation`
+
+Response includes:
+
+- canonical image digest reference used for registry discovery
+- signature records with signer, issuer, timestamp, and verification status
+- attestation records with predicate type, DSSE payload type, statement subjects, and provenance summary
+- summary counts by verification status plus a provenance total
+
+Verification defaults to permissive keyless identity regexes (`.*`). For stricter validation or key-based verification, configure:
+
+- `OTTER_COSIGN_PUBLIC_KEY`
+- `OTTER_COSIGN_IDENTITY_REGEXP`
+- `OTTER_COSIGN_OIDC_ISSUER_REGEXP`
+
 ## Import OpenVEX
 
 `POST /api/v1/images/:id/vex?org_id=default_org`

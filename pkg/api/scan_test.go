@@ -15,6 +15,7 @@ import (
 	"github.com/anchore/syft/syft/artifact"
 	syftpkg "github.com/anchore/syft/syft/pkg"
 	syftsbom "github.com/anchore/syft/syft/sbom"
+	"github.com/otterXf/otter/pkg/attestation"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
@@ -27,6 +28,15 @@ type stubAnalyzer struct {
 }
 
 func (s stubAnalyzer) Analyze(context.Context, string) (scan.AnalysisResult, error) {
+	return s.result, s.err
+}
+
+type stubAttestationFetcher struct {
+	result attestation.Result
+	err    error
+}
+
+func (s stubAttestationFetcher) Discover(context.Context, string) (attestation.Result, error) {
 	return s.result, s.err
 }
 
@@ -342,6 +352,108 @@ func TestGetImageVulnerabilitiesFiltersSeverity(t *testing.T) {
 	}
 	if payload.Summary.Total != 1 || payload.SummaryAll.Total != 2 || payload.Vulnerabilities[0].ID != "CVE-2024-0001" {
 		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestGetImageAttestationsReturnsRegistryData(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	if _, err := sbomRepo.Save(context.Background(), sbomindex.Record{
+		OrgID:        "demo-org",
+		ImageID:      "demo-image",
+		ImageName:    "ghcr.io/example/demo:1.0",
+		SourceFormat: sbomindex.FormatCycloneDX,
+		PackageCount: 1,
+	}); err != nil {
+		t.Fatalf("sbomRepo.Save() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	handler.attestor = stubAttestationFetcher{
+		result: attestation.Result{
+			CanonicalRef: "ghcr.io/example/demo@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			ImageDigest:  "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			Signatures: []attestation.Record{
+				{
+					Digest:             "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					Kind:               attestation.KindSignature,
+					VerificationStatus: attestation.VerificationStatusValid,
+					Signer:             "signer@example.com",
+				},
+			},
+			Attestations: []attestation.Record{
+				{
+					Digest:             "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+					Kind:               attestation.KindAttestation,
+					VerificationStatus: attestation.VerificationStatusValid,
+					PredicateType:      "https://slsa.dev/provenance/v0.2",
+				},
+			},
+			Summary: attestation.Summary{
+				Total:        2,
+				Signatures:   1,
+				Attestations: 1,
+				Provenance:   1,
+				ByVerificationStatus: map[string]int{
+					attestation.VerificationStatusValid: 2,
+				},
+			},
+			UpdatedAt: time.Date(2026, 3, 13, 19, 0, 0, 0, time.UTC),
+		},
+	}
+
+	router := gin.New()
+	router.GET("/api/v1/images/:id/attestations", handler.GetImageAttestations)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/images/demo-image/attestations?org_id=demo-org", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var payload struct {
+		ImageName string `json:"image_name"`
+		Summary   struct {
+			Provenance int `json:"provenance"`
+		} `json:"summary"`
+		Signatures []struct {
+			Signer string `json:"signer"`
+		} `json:"signatures"`
+		Attestations []struct {
+			PredicateType string `json:"predicate_type"`
+		} `json:"attestations"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got, want := payload.ImageName, "ghcr.io/example/demo:1.0"; got != want {
+		t.Fatalf("ImageName = %q, want %q", got, want)
+	}
+	if got, want := payload.Signatures[0].Signer, "signer@example.com"; got != want {
+		t.Fatalf("Signatures[0].Signer = %q, want %q", got, want)
+	}
+	if got, want := payload.Attestations[0].PredicateType, "https://slsa.dev/provenance/v0.2"; got != want {
+		t.Fatalf("Attestations[0].PredicateType = %q, want %q", got, want)
+	}
+	if got, want := payload.Summary.Provenance, 1; got != want {
+		t.Fatalf("Summary.Provenance = %d, want %d", got, want)
 	}
 }
 

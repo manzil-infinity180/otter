@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/otterXf/otter/pkg/attestation"
 	"github.com/otterXf/otter/pkg/compare"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
@@ -42,10 +43,17 @@ type ScanHandler struct {
 	sbomIndex sbomindex.Repository
 	vulnIndex vulnindex.Repository
 	analyzer  scan.ImageAnalyzer
+	attestor  attestation.Fetcher
 }
 
 func NewScanHandler(store storage.Store, sbomIndex sbomindex.Repository, vulnIndex vulnindex.Repository, analyzer scan.ImageAnalyzer) *ScanHandler {
-	return &ScanHandler{store: store, sbomIndex: sbomIndex, vulnIndex: vulnIndex, analyzer: analyzer}
+	return &ScanHandler{
+		store:     store,
+		sbomIndex: sbomIndex,
+		vulnIndex: vulnIndex,
+		analyzer:  analyzer,
+		attestor:  attestation.NewDiscoverer(attestation.ConfigFromEnv()),
+	}
 }
 
 func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
@@ -588,6 +596,43 @@ func (h *ScanHandler) GetImageVulnerabilities(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func (h *ScanHandler) GetImageAttestations(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	imageRef, err := h.resolveStoredImageReference(c.Request.Context(), orgID, imageID)
+	if err != nil {
+		if errors.Is(err, sbomindex.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "stored image reference not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("resolve image reference: %v", err)})
+		return
+	}
+
+	result, err := h.attestor.Discover(c.Request.Context(), imageRef)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("discover attestations: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"org_id":          orgID,
+		"image_id":        imageID,
+		"image_name":      imageRef,
+		"storage_backend": h.store.Backend(),
+		"image_digest":    result.ImageDigest,
+		"canonical_ref":   result.CanonicalRef,
+		"summary":         result.Summary,
+		"signatures":      result.Signatures,
+		"attestations":    result.Attestations,
+		"updated_at":      result.UpdatedAt,
+	})
+}
+
 func (h *ScanHandler) CompareImages(c *gin.Context) {
 	image1Ref := strings.TrimSpace(c.Query("image1"))
 	image2Ref := strings.TrimSpace(c.Query("image2"))
@@ -840,6 +885,56 @@ func (h *ScanHandler) getExistingVulnerabilityRecord(ctx context.Context, orgID,
 		return nil, nil
 	}
 	return nil, err
+}
+
+func (h *ScanHandler) resolveStoredImageReference(ctx context.Context, orgID, imageID string) (string, error) {
+	sbomMissing := false
+	record, err := h.sbomIndex.Get(ctx, orgID, imageID)
+	switch {
+	case err == nil && strings.TrimSpace(record.ImageName) != "":
+		return record.ImageName, nil
+	case err != nil && !errors.Is(err, sbomindex.ErrNotFound):
+		return "", err
+	case errors.Is(err, sbomindex.ErrNotFound):
+		sbomMissing = true
+	}
+
+	vulnerabilityMissing := false
+	vulnerabilities, err := h.vulnIndex.Get(ctx, orgID, imageID)
+	switch {
+	case err == nil && strings.TrimSpace(vulnerabilities.ImageName) != "":
+		return vulnerabilities.ImageName, nil
+	case err != nil && !errors.Is(err, vulnindex.ErrNotFound):
+		return "", err
+	case errors.Is(err, vulnindex.ErrNotFound):
+		vulnerabilityMissing = true
+	}
+
+	prefix, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildImagePrefix()
+	if err != nil {
+		return "", err
+	}
+	objects, err := h.store.List(ctx, prefix)
+	if err != nil {
+		return "", err
+	}
+	for _, object := range objects {
+		imageName := strings.TrimSpace(object.Metadata["image_name"])
+		if imageName == "" {
+			continue
+		}
+		if err := validateImageReference(imageName); err == nil {
+			return imageName, nil
+		}
+	}
+
+	if vulnerabilityMissing {
+		if sbomMissing {
+			return "", sbomindex.ErrNotFound
+		}
+		return "", vulnindex.ErrNotFound
+	}
+	return "", sbomindex.ErrNotFound
 }
 
 type comparisonTarget struct {

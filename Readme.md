@@ -24,6 +24,11 @@ Useful environment variables:
 - `OTTER_TRIVY_BINARY`
 - `OTTER_TRIVY_TIMEOUT`
 - `OTTER_TRIVY_SCANNERS`
+- `OTTER_COSIGN_BINARY`
+- `OTTER_COSIGN_TIMEOUT`
+- `OTTER_COSIGN_PUBLIC_KEY`
+- `OTTER_COSIGN_IDENTITY_REGEXP`
+- `OTTER_COSIGN_OIDC_ISSUER_REGEXP`
 - `S3_BUCKET_NAME`
 - `AWS_REGION`
 
@@ -60,6 +65,7 @@ Otter also indexes vulnerability findings for image-level APIs:
 - `GET /api/v1/images/:id/vulnerabilities?org_id=default_org`
 - optional `severity=critical|high|medium|low|negligible`
 - optional `status=affected|not_affected|fixed|under_investigation`
+- `GET /api/v1/images/:id/attestations?org_id=default_org`
 - OpenVEX import via `POST /api/v1/images/:id/vex?org_id=default_org`
 
 The vulnerability response includes:
@@ -68,6 +74,12 @@ The vulnerability response includes:
 - summary counts by severity, scanner, and advisory status
 - fix recommendations grouped by affected package
 - trend snapshots preserved across re-scans
+
+The attestation response includes:
+
+- signatures discovered through OCI referrers plus `cosign verify` status
+- in-toto and DSSE attestations with parsed SLSA provenance summaries
+- signer, issuer, timestamp, predicate type, and statement subjects when present
 
 
 
