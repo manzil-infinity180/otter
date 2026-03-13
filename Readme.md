@@ -2,6 +2,9 @@
 An open-source SBOM & vulnerability analyzer.
 It scans container images generates CycloneDX SBOMs, lists vulnerabilities
 
+For the project-level implementation summary and future-agent handoff, see
+`AGENT_PROCESS.md`.
+
 
 
 https://github.com/user-attachments/assets/60a8e2e2-3fb9-4687-979f-f980c1fbcac2
