@@ -3,8 +3,8 @@ import clsx from "clsx";
 import { startTransition, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
-import { compareImages, getAttestations, getComparisonExportURL, getImageExportURL, getOverview, getSbom, getVulnerabilities, listCatalog } from "../lib/api";
-import { buildDependencyChildren, formatBytes, formatTimestamp, vulnerabilityChips } from "../lib/format";
+import { compareImages, getAttestations, getComparisonExportURL, getCompliance, getImageExportURL, getOverview, getSbom, getVulnerabilities, listCatalog } from "../lib/api";
+import { buildDependencyChildren, complianceTone, formatBytes, formatTimestamp, vulnerabilityChips } from "../lib/format";
 import type { CatalogItem, DependencyNode, ImageExportFormat, OverviewResponse, Severity, VulnerabilityRecord } from "../lib/types";
 import { EmptyState } from "../components/empty-state";
 import { SeverityPill } from "../components/severity-pill";
@@ -41,6 +41,13 @@ export function ImageDetailPage() {
     queryKey: ["vulnerabilities", orgId, imageId],
     queryFn: () => getVulnerabilities(orgId, imageId),
     enabled: Boolean(orgId && imageId)
+  });
+
+  const complianceQuery = useQuery({
+    queryKey: ["compliance", orgId, imageId],
+    queryFn: () => getCompliance(orgId, imageId),
+    enabled: Boolean(orgId && imageId),
+    retry: false
   });
 
   const sbomQuery = useQuery({
@@ -218,6 +225,132 @@ export function ImageDetailPage() {
                   <StatCard label="Fixable" value={overview.vulnerability_summary.fixable} />
                   <StatCard label="Unfixable" value={overview.vulnerability_summary.unfixable} />
                 </div>
+              </div>
+              <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h2 className="font-display text-2xl text-ink-900 dark:text-white">Compliance posture</h2>
+                    <p className="mt-2 max-w-3xl text-sm text-ink-600 dark:text-ink-300">
+                      {complianceQuery.data?.scope_note ?? "Best-effort standards tracking based on provenance, signatures, vulnerabilities, and upstream project posture."}
+                    </p>
+                  </div>
+                  {complianceQuery.data ? (
+                    <span className={clsx("rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em]", complianceTone(complianceQuery.data.summary.overall_status))}>
+                      {complianceQuery.data.summary.overall_status}
+                    </span>
+                  ) : null}
+                </div>
+
+                {complianceQuery.isLoading ? (
+                  <p className="mt-5 text-sm text-ink-500 dark:text-ink-400">Loading compliance signals…</p>
+                ) : complianceQuery.isError ? (
+                  <p className="mt-5 text-sm text-rose dark:text-rose/90">
+                    {complianceQuery.error instanceof Error ? complianceQuery.error.message : "The compliance endpoint returned an error."}
+                  </p>
+                ) : complianceQuery.data ? (
+                  <div className="mt-5 grid gap-6">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <StatCard label="SLSA level" value={`${complianceQuery.data.slsa.level}/${complianceQuery.data.slsa.target_level}`} detail={complianceQuery.data.slsa.verified ? "verified provenance" : "best effort"} />
+                      <StatCard label="Scorecard" value={complianceQuery.data.scorecard.available ? complianceQuery.data.scorecard.score?.toFixed(1) ?? "0.0" : "n/a"} detail={complianceQuery.data.scorecard.risk_level ?? complianceQuery.data.scorecard.status} />
+                      <StatCard label="Checklist pass" value={complianceQuery.data.summary.passed} detail={`${complianceQuery.data.summary.partial} partial`} />
+                      <StatCard label="Checklist fail" value={complianceQuery.data.summary.failed} detail={`${complianceQuery.data.summary.unavailable} unavailable`} />
+                    </div>
+
+                    <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                      <div className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={clsx("rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em]", complianceTone(complianceQuery.data.slsa.status))}>
+                            SLSA {complianceQuery.data.slsa.level}
+                          </span>
+                          {complianceQuery.data.source_repository ? (
+                            <a href={complianceQuery.data.source_repository.url} className="text-sm text-tide hover:text-sky-600 dark:hover:text-sky-300">
+                              {complianceQuery.data.source_repository.repository}
+                            </a>
+                          ) : null}
+                        </div>
+                        <dl className="mt-4 grid gap-3 text-sm text-ink-600 dark:text-ink-300">
+                          <div><dt className="font-medium text-ink-900 dark:text-white">Builder</dt><dd>{complianceQuery.data.slsa.builder_id || "Unavailable"}</dd></div>
+                          <div><dt className="font-medium text-ink-900 dark:text-white">Build type</dt><dd>{complianceQuery.data.slsa.build_type || "Unavailable"}</dd></div>
+                          <div><dt className="font-medium text-ink-900 dark:text-white">Invocation</dt><dd>{complianceQuery.data.slsa.invocation_id || "Unavailable"}</dd></div>
+                        </dl>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {(complianceQuery.data.slsa.evidence ?? []).map((item) => (
+                            <span key={item} className="rounded-full bg-mint/10 px-3 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                              {item}
+                            </span>
+                          ))}
+                          {(complianceQuery.data.slsa.missing ?? []).map((item) => (
+                            <span key={item} className="rounded-full bg-rose/10 px-3 py-1 text-xs font-medium text-rose dark:text-rose/90">
+                              missing {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="font-display text-xl text-ink-900 dark:text-white">OpenSSF Scorecard</h3>
+                          <span className={clsx("rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em]", complianceTone(complianceQuery.data.scorecard.status))}>
+                            {complianceQuery.data.scorecard.status}
+                          </span>
+                        </div>
+                        <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">
+                          {complianceQuery.data.scorecard.available
+                            ? `${complianceQuery.data.scorecard.repository} scored ${complianceQuery.data.scorecard.score?.toFixed(1)}`
+                            : complianceQuery.data.scorecard.error || "Scorecard data unavailable."}
+                        </p>
+                        {complianceQuery.data.scorecard.available ? (
+                          <div className="mt-4 space-y-3">
+                            {(complianceQuery.data.scorecard.checks ?? []).slice(0, 5).map((check) => (
+                              <div key={check.name} className="rounded-2xl border border-ink-200 p-3 dark:border-ink-800">
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="font-medium text-ink-900 dark:text-white">{check.name}</p>
+                                  <span className="text-sm text-ink-600 dark:text-ink-300">{check.score}/10</span>
+                                </div>
+                                {check.reason ? <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">{check.reason}</p> : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
+                      <h3 className="font-display text-xl text-ink-900 dark:text-white">Standards checklist</h3>
+                      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+                        {complianceQuery.data.standards.map((standard) => (
+                          <article key={standard.name} className="rounded-2xl border border-ink-200 p-4 dark:border-ink-800">
+                            <div className="flex items-center justify-between gap-3">
+                              <h4 className="font-medium text-ink-900 dark:text-white">{standard.name}</h4>
+                              <span className={clsx("rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em]", complianceTone(standard.status))}>
+                                {standard.status}
+                              </span>
+                            </div>
+                            <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">{standard.summary}</p>
+                            <div className="mt-4 space-y-3">
+                              {standard.checks.map((check) => (
+                                <div key={check.id}>
+                                  <div className="flex items-center gap-2">
+                                    <span className={clsx("rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.16em]", complianceTone(check.status))}>
+                                      {check.status}
+                                    </span>
+                                    <p className="text-sm font-medium text-ink-900 dark:text-white">{check.title}</p>
+                                  </div>
+                                  <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">{check.detail}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                      {complianceQuery.data.evidence_errors?.length ? (
+                        <div className="mt-4 rounded-2xl border border-rose/30 bg-rose/8 p-4 text-sm text-rose dark:text-rose/90">
+                          {complianceQuery.data.evidence_errors.join(" ")}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
                 <h2 className="font-display text-2xl text-ink-900 dark:text-white">Exports</h2>

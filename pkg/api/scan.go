@@ -19,6 +19,7 @@ import (
 	"github.com/otterXf/otter/pkg/attestation"
 	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compare"
+	"github.com/otterXf/otter/pkg/compliance"
 	"github.com/otterXf/otter/pkg/registry"
 	reportexport "github.com/otterXf/otter/pkg/reportexport"
 	"github.com/otterXf/otter/pkg/sbomindex"
@@ -43,13 +44,14 @@ type ImageGeneratePayload struct {
 }
 
 type ScanHandler struct {
-	store     storage.Store
-	sbomIndex sbomindex.Repository
-	vulnIndex vulnindex.Repository
-	analyzer  scan.ImageAnalyzer
-	attestor  attestation.Fetcher
-	registry  registry.Service
-	jobs      scanJobQueue
+	store      storage.Store
+	sbomIndex  sbomindex.Repository
+	vulnIndex  vulnindex.Repository
+	analyzer   scan.ImageAnalyzer
+	attestor   attestation.Fetcher
+	compliance compliance.Assessor
+	registry   registry.Service
+	jobs       scanJobQueue
 }
 
 type scanJobQueue interface {
@@ -95,12 +97,13 @@ func NewScanHandlerWithRegistry(store storage.Store, sbomIndex sbomindex.Reposit
 		registryService = registry.NewManager(registry.NewMemoryRepository(), registry.Config{})
 	}
 	return &ScanHandler{
-		store:     store,
-		sbomIndex: sbomIndex,
-		vulnIndex: vulnIndex,
-		analyzer:  analyzer,
-		attestor:  attestation.NewDiscoverer(attestation.ConfigFromEnv()),
-		registry:  registryService,
+		store:      store,
+		sbomIndex:  sbomIndex,
+		vulnIndex:  vulnIndex,
+		analyzer:   analyzer,
+		attestor:   attestation.NewDiscoverer(attestation.ConfigFromEnv()),
+		compliance: compliance.NewService(compliance.ConfigFromEnv()),
+		registry:   registryService,
 	}
 }
 

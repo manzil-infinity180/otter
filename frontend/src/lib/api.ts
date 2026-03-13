@@ -1,6 +1,7 @@
 import type {
   AttestationsResponse,
   CatalogResponse,
+  ComplianceResponse,
   ComparisonResponse,
   ImageExportFormat,
   OverviewResponse,
@@ -55,6 +56,10 @@ export function listCatalog(params?: {
 
 export function getOverview(orgId: string, imageId: string) {
   return request<OverviewResponse>(`/api/v1/images/${imageId}/overview`, { org_id: orgId });
+}
+
+export function getCompliance(orgId: string, imageId: string) {
+  return request<ComplianceResponse>(`/api/v1/images/${imageId}/compliance`, { org_id: orgId });
 }
 
 export function getVulnerabilities(orgId: string, imageId: string) {

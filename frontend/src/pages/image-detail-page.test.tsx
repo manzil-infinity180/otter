@@ -111,6 +111,66 @@ describe("ImageDetailPage", () => {
         };
       }
 
+      if (url.includes("/compliance")) {
+        return {
+          ok: true,
+          json: async () => ({
+            org_id: "demo-org",
+            image_id: "image-a",
+            image_name: "alpine:3.20",
+            storage_backend: "local",
+            image_ref: "alpine:3.20",
+            scope_note: "Best-effort standards tracking.",
+            source_repository: {
+              host: "github.com",
+              owner: "demo",
+              name: "project",
+              repository: "github.com/demo/project",
+              url: "https://github.com/demo/project",
+              derived_from: "attestation.materials",
+              confidence: "high"
+            },
+            slsa: {
+              level: 3,
+              target_level: 3,
+              status: "pass",
+              verified: true,
+              builder_id: "https://github.com/actions/runner",
+              build_type: "https://slsa.dev/container-based-build/v1",
+              invocation_id: "run-123",
+              materials: ["git+https://github.com/demo/project@refs/heads/main"],
+              evidence: ["provenance attestation detected"],
+              missing: []
+            },
+            scorecard: {
+              enabled: true,
+              available: true,
+              status: "pass",
+              repository: "github.com/demo/project",
+              score: 8.9,
+              risk_level: "strong",
+              checks: [{ name: "Maintained", score: 10, reason: "active project" }]
+            },
+            standards: [
+              {
+                name: "SLSA",
+                status: "pass",
+                summary: "SLSA Level 3 evidence is present.",
+                checks: [{ id: "slsa-provenance", title: "Provenance attestation", status: "pass", detail: "Detected." }]
+              }
+            ],
+            summary: {
+              overall_status: "pass",
+              passed: 3,
+              partial: 0,
+              failed: 0,
+              unavailable: 0
+            },
+            updated_at: "2026-03-13T18:30:00Z"
+          })
+        };
+      }
+
       if (url.includes("/sbom")) {
         return {
           ok: true,
@@ -248,6 +308,15 @@ describe("ImageDetailPage", () => {
     await waitFor(() => expect(screen.getByText("CVE-2024-0001")).toBeInTheDocument());
     expect(screen.getByRole("tab", { name: "Vulnerabilities" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("busybox 1.36.1")).toBeInTheDocument();
+  });
+
+  it("renders the compliance dashboard in the overview tab", async () => {
+    renderImagePage();
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Compliance posture" })).toBeInTheDocument());
+    expect(screen.getByText("github.com/demo/project")).toBeInTheDocument();
+    expect(screen.getByText("SLSA 3")).toBeInTheDocument();
+    expect(screen.getByText("OpenSSF Scorecard")).toBeInTheDocument();
   });
 
   it("renders export links for image and comparison downloads", async () => {

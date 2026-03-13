@@ -175,14 +175,21 @@ func (h *ScanHandler) BrowseImage(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "load vulnerabilities: %v", err)
 		return
 	}
+	complianceReport, err := h.buildImageCompliance(c.Request.Context(), orgID, imageID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "load compliance: %v", err)
+		return
+	}
 
 	var body bytes.Buffer
 	data := struct {
 		Overview        ImageOverview
+		Compliance      ImageComplianceResponse
 		Packages        []sbomindex.PackageRecord
 		Vulnerabilities []vulnindex.VulnerabilityRecord
 	}{
 		Overview:        overview,
+		Compliance:      complianceReport,
 		Packages:        limitPackages(sbomRecord.Packages, 25),
 		Vulnerabilities: limitVulnerabilities(vulnerabilityRecord.Vulnerabilities, 25),
 	}
@@ -619,6 +626,7 @@ var browseImageTemplate = template.Must(template.New("browse-image").Parse(`<!do
       </div>
       <div class="meta">
         <a href="/api/v1/images/{{.Overview.ImageID}}/overview?org_id={{.Overview.OrgID}}">overview JSON</a>
+        <a href="/api/v1/images/{{.Overview.ImageID}}/compliance?org_id={{.Overview.OrgID}}">compliance JSON</a>
         <a href="/api/v1/images/{{.Overview.ImageID}}/vulnerabilities?org_id={{.Overview.OrgID}}">vulnerabilities JSON</a>
         <a href="/api/v1/images/{{.Overview.ImageID}}/sbom?org_id={{.Overview.OrgID}}">sbom JSON</a>
         <a href="/api/v1/images/{{.Overview.ImageID}}/attestations?org_id={{.Overview.OrgID}}">attestations JSON</a>
@@ -627,6 +635,32 @@ var browseImageTemplate = template.Must(template.New("browse-image").Parse(`<!do
         <a href="/api/v1/images/{{.Overview.ImageID}}/export?org_id={{.Overview.OrgID}}&format=csv">export CSV</a>
         <a href="/api/v1/images/{{.Overview.ImageID}}/export?org_id={{.Overview.OrgID}}&format=sarif">export SARIF</a>
       </div>
+    </section>
+    <section class="panel">
+      <h2>Compliance</h2>
+      <div class="stats">
+        <div class="stat"><strong>{{.Compliance.Summary.OverallStatus}}</strong><br>overall posture</div>
+        <div class="stat"><strong>SLSA {{.Compliance.SLSA.Level}}</strong><br>{{if .Compliance.SLSA.Verified}}verified{{else}}unverified{{end}}</div>
+        <div class="stat"><strong>{{if .Compliance.Scorecard.Available}}{{printf "%.1f" .Compliance.Scorecard.Score}}{{else}}n/a{{end}}</strong><br>OpenSSF Scorecard</div>
+      </div>
+      <div class="meta" style="margin-top: 12px;">
+        {{if .Compliance.SourceRepo}}<span>Source: <a href="{{.Compliance.SourceRepo.URL}}">{{.Compliance.SourceRepo.Repository}}</a></span>{{end}}
+        <span>{{.Compliance.ScopeNote}}</span>
+      </div>
+      <table>
+        <thead><tr><th>Standard</th><th>Status</th><th>Summary</th></tr></thead>
+        <tbody>
+          {{range .Compliance.Standards}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>{{.Status}}</td>
+            <td>{{.Summary}}</td>
+          </tr>
+          {{else}}
+          <tr><td colspan="3">No compliance signals available.</td></tr>
+          {{end}}
+        </tbody>
+      </table>
     </section>
     <section class="panel">
       <h2>Tags</h2>

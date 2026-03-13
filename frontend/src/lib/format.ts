@@ -1,4 +1,4 @@
-import type { DependencyNode, Severity, VulnerabilitySummary } from "./types";
+import type { ComplianceStatus, DependencyNode, Severity, VulnerabilitySummary } from "./types";
 
 const severityOrder: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "NEGLIGIBLE", "UNKNOWN"];
 
@@ -44,6 +44,19 @@ export function severityTone(severity: Severity) {
       return "bg-tide/15 text-sky-700 ring-1 ring-inset ring-sky-500/30 dark:text-sky-300";
     case "LOW":
       return "bg-mint/15 text-emerald-700 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-300";
+    default:
+      return "bg-ink-200 text-ink-700 ring-1 ring-inset ring-ink-300 dark:bg-ink-800 dark:text-ink-200 dark:ring-ink-700";
+  }
+}
+
+export function complianceTone(status: ComplianceStatus) {
+  switch (status) {
+    case "pass":
+      return "bg-mint/15 text-emerald-700 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-300";
+    case "partial":
+      return "bg-ember/15 text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:text-amber-300";
+    case "fail":
+      return "bg-rose/15 text-rose ring-1 ring-inset ring-rose/30";
     default:
       return "bg-ink-200 text-ink-700 ring-1 ring-inset ring-ink-300 dark:bg-ink-800 dark:text-ink-200 dark:ring-ink-700";
   }

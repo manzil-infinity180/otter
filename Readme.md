@@ -104,6 +104,7 @@ Otter also indexes vulnerability findings for image-level APIs:
 - `GET /api/v1/images/:id/vulnerabilities?org_id=default_org`
 - optional `severity=critical|high|medium|low|negligible`
 - optional `status=affected|not_affected|fixed|under_investigation`
+- `GET /api/v1/images/:id/compliance?org_id=default_org`
 - `GET /api/v1/images/:id/attestations?org_id=default_org`
 - OpenVEX import via `POST /api/v1/images/:id/vex?org_id=default_org`
 
@@ -119,6 +120,20 @@ The attestation response includes:
 - signatures discovered through OCI referrers plus `cosign verify` status
 - in-toto and DSSE attestations with parsed SLSA provenance summaries
 - signer, issuer, timestamp, predicate type, and statement subjects when present
+
+The compliance response includes:
+
+- SLSA provenance level detection derived from stored provenance evidence
+- OpenSSF Scorecard lookups for detected GitHub source repositories
+- a standards checklist for SLSA, NIST SSDF, and CIS Container Image guidance
+- best-effort evidence errors when registry attestation discovery or Scorecard lookups are unavailable
+
+Scorecard integration is enabled by default and can be tuned with:
+
+- `OTTER_SCORECARD_ENABLED`
+- `OTTER_SCORECARD_BASE_URL`
+- `OTTER_SCORECARD_TIMEOUT`
+- `OTTER_SCORECARD_SHOW_DETAILS`
 
 ## Automated catalog scanning
 

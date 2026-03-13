@@ -18,6 +18,7 @@ import (
 	syftsbom "github.com/anchore/syft/syft/sbom"
 	"github.com/otterXf/otter/pkg/attestation"
 	"github.com/otterXf/otter/pkg/catalogscan"
+	"github.com/otterXf/otter/pkg/compliance"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
@@ -40,6 +41,15 @@ type stubAttestationFetcher struct {
 
 func (s stubAttestationFetcher) Discover(context.Context, string) (attestation.Result, error) {
 	return s.result, s.err
+}
+
+type stubComplianceScorecardClient struct {
+	summary compliance.ScorecardSummary
+	err     error
+}
+
+func (s stubComplianceScorecardClient) Lookup(context.Context, compliance.Repository) (compliance.ScorecardSummary, error) {
+	return s.summary, s.err
 }
 
 type stubJobQueue struct {
@@ -338,6 +348,95 @@ func TestGetImageSBOMReturnsStructuredDocument(t *testing.T) {
 	}
 	if payload.Format != sbomindex.FormatSPDX || payload.PackageCount != 2 {
 		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestGetImageComplianceReturnsStructuredAssessment(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	if _, err := repo.Save(context.Background(), sbomindex.Record{
+		OrgID:        "demo-org",
+		ImageID:      "demo-image",
+		ImageName:    "ghcr.io/demo/project:1.0.0",
+		SourceFormat: sbomindex.FormatCycloneDX,
+		UpdatedAt:    time.Date(2026, 3, 14, 1, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("repo.Save() error = %v", err)
+	}
+	if _, err := vulnRepo.Save(context.Background(), vulnindex.Record{
+		OrgID:     "demo-org",
+		ImageID:   "demo-image",
+		ImageName: "ghcr.io/demo/project:1.0.0",
+		Summary: vulnindex.Summary{
+			BySeverity: map[string]int{},
+		},
+		UpdatedAt: time.Date(2026, 3, 14, 1, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("vulnRepo.Save() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
+	handler.attestor = stubAttestationFetcher{
+		result: attestation.Result{
+			ImageRef: "ghcr.io/demo/project:1.0.0",
+			Summary:  attestation.Summary{Total: 1, Signatures: 1, Attestations: 1, Provenance: 1},
+			Attestations: []attestation.Record{
+				{
+					Digest:             "sha256:abc123",
+					Kind:               attestation.KindAttestation,
+					VerificationStatus: attestation.VerificationStatusValid,
+					PredicateType:      "https://slsa.dev/provenance/v1",
+					Provenance: &attestation.ProvenanceSummary{
+						BuilderID:    "https://github.com/actions/runner",
+						BuildType:    "https://slsa.dev/container-based-build/v1",
+						InvocationID: "run-123",
+						Materials:    []string{"git+https://github.com/demo/project@refs/heads/main"},
+					},
+				},
+			},
+			UpdatedAt: time.Date(2026, 3, 14, 1, 5, 0, 0, time.UTC),
+		},
+	}
+	handler.compliance = compliance.NewServiceWithClient(stubComplianceScorecardClient{
+		summary: compliance.ScorecardSummary{
+			Enabled:    true,
+			Available:  true,
+			Status:     compliance.StatusPass,
+			Repository: "github.com/demo/project",
+			Score:      9.1,
+			RiskLevel:  "strong",
+		},
+	})
+
+	router := gin.New()
+	router.GET("/api/v1/images/:id/compliance", handler.GetImageCompliance)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/images/demo-image/compliance?org_id=demo-org", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+	if !bytes.Contains(resp.Body.Bytes(), []byte(`"repository":"github.com/demo/project"`)) {
+		t.Fatalf("expected source repository in response, body=%s", resp.Body.String())
+	}
+	if !bytes.Contains(resp.Body.Bytes(), []byte(`"level":3`)) {
+		t.Fatalf("expected slsa level 3 in response, body=%s", resp.Body.String())
 	}
 }
 

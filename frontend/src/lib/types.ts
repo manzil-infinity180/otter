@@ -1,5 +1,6 @@
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "NEGLIGIBLE" | "UNKNOWN";
 export type ImageExportFormat = "cyclonedx" | "spdx" | "json" | "csv" | "sarif";
+export type ComplianceStatus = "pass" | "partial" | "fail" | "unavailable";
 
 export interface LicenseSummaryEntry {
   license: string;
@@ -62,6 +63,80 @@ export interface OverviewResponse extends CatalogItem {
   dependency_roots: string[];
   files: ScanFile[];
   tags: TagItem[];
+}
+
+export interface ComplianceRepository {
+  host: string;
+  owner: string;
+  name: string;
+  repository: string;
+  url: string;
+  derived_from: string;
+  confidence: string;
+}
+
+export interface ComplianceCheck {
+  id: string;
+  title: string;
+  status: ComplianceStatus;
+  detail: string;
+}
+
+export interface ComplianceStandard {
+  name: string;
+  status: ComplianceStatus;
+  summary: string;
+  checks: ComplianceCheck[];
+}
+
+export interface ComplianceScorecardCheck {
+  name: string;
+  score: number;
+  reason?: string;
+  documentation_url?: string;
+}
+
+export interface ComplianceResponse {
+  org_id: string;
+  image_id: string;
+  image_name: string;
+  storage_backend: string;
+  image_ref: string;
+  scope_note: string;
+  source_repository?: ComplianceRepository;
+  slsa: {
+    level: number;
+    target_level: number;
+    status: ComplianceStatus;
+    verified: boolean;
+    builder_id?: string;
+    build_type?: string;
+    invocation_id?: string;
+    materials?: string[];
+    evidence?: string[];
+    missing?: string[];
+  };
+  scorecard: {
+    enabled: boolean;
+    available: boolean;
+    status: ComplianceStatus;
+    repository?: string;
+    score?: number;
+    date?: string;
+    risk_level?: string;
+    checks?: ComplianceScorecardCheck[];
+    error?: string;
+  };
+  standards: ComplianceStandard[];
+  summary: {
+    overall_status: ComplianceStatus;
+    passed: number;
+    partial: number;
+    failed: number;
+    unavailable: number;
+  };
+  evidence_errors?: string[];
+  updated_at: string;
 }
 
 export interface CVSSScore {

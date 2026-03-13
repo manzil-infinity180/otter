@@ -17,6 +17,7 @@ func setupScanRoutes(router *gin.Engine, handlers *Handlers) {
 	router.GET("/api/v1/comparisons/:id/export", handlers.ScanHandler.ExportComparison)
 	router.GET("/api/v1/catalog", handlers.ScanHandler.ListCatalog)
 	router.GET("/api/v1/images/:id/overview", handlers.ScanHandler.GetImageOverview)
+	router.GET("/api/v1/images/:id/compliance", handlers.ScanHandler.GetImageCompliance)
 	router.GET("/api/v1/images/:id/export", handlers.ScanHandler.ExportImage)
 	router.GET("/api/v1/images/:id/sbom", handlers.ScanHandler.GetImageSBOM)
 	router.POST("/api/v1/images/:id/sbom", handlers.ScanHandler.ImportImageSBOM)

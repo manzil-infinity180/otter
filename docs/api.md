@@ -181,6 +181,26 @@ Response includes:
 - available scan artifacts for download
 - related tags already stored for the same repository within the org
 
+## Get image compliance
+
+`GET /api/v1/images/:id/compliance?org_id=default_org`
+
+Behavior:
+
+- resolves the stored image reference from indexed scan data
+- performs best-effort attestation discovery for provenance and verification signals
+- derives a SLSA provenance level from builder, build type, materials, invocation, and verification evidence
+- looks up OpenSSF Scorecard data when a GitHub source repository can be inferred from provenance materials or GHCR naming
+- summarizes a standards checklist for SLSA, NIST SSDF, and CIS Container Image guidance
+
+Response includes:
+
+- `source_repository` metadata with the inference source and confidence
+- `slsa` evidence, missing signals, and detected level
+- `scorecard` availability, score, risk level, and lowest-scoring checks
+- `standards` checklist entries with `pass`, `partial`, `fail`, or `unavailable` states
+- `summary` totals plus `evidence_errors` for upstream lookup failures that were downgraded instead of failing the request
+
 ## Export image data
 
 `GET /api/v1/images/:id/export?org_id=default_org&format=cyclonedx|spdx|json|csv|sarif`
