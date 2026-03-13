@@ -2,40 +2,36 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/otterXf/otter/pkg/aws"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/otterXf/otter/pkg/scan"
+	"github.com/otterXf/otter/pkg/storage"
 )
+
+const scanTimeout = 10 * time.Minute
 
 type ImageGeneratePayload struct {
 	Arch      string `json:"arch"`
 	ImageName string `json:"image_name"`
 	Registry  string `json:"registry"`
-	OrgID     string `json:"org_id"`   // Optional for now
-	ImageID   string `json:"image_id"` // Optional for now
+	OrgID     string `json:"org_id"`
+	ImageID   string `json:"image_id"`
 }
 
-// ScanHandler handles scan-related HTTP requests
 type ScanHandler struct {
-	S3Client   aws.BucketBasics
-	BucketName string
+	store storage.Store
 }
 
-// NewScanHandler creates a new ScanHandler with dependencies
-func NewScanHandler(s3Client aws.BucketBasics, bucketName string) *ScanHandler {
-	return &ScanHandler{
-		S3Client:   s3Client,
-		BucketName: bucketName,
-	}
+func NewScanHandler(store storage.Store) *ScanHandler {
+	return &ScanHandler{store: store}
 }
 
-// GenerateScanSbomVul generates SBOM, scans for vulnerabilities, and uploads both to S3
 func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 	var payload ImageGeneratePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -43,187 +39,232 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		return
 	}
 
-	// Use default org/image IDs if not provided
-	orgID := payload.OrgID
-	if orgID == "" {
-		orgID = "default_org"
-	}
-	imageID := payload.ImageID
-	if imageID == "" {
-		imageID = "default_image"
+	if err := validateImageReference(payload.ImageName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
-	// Get the source and generate SBOM
-	src := scan.GetSource(scan.ImageReference(payload.ImageName))
-	defer func() {
-		if err := src.Close(); err != nil {
-			log.Printf("failed to close source: %v", err)
+	orgID, imageID, err := normalizeArtifactIDs(payload.OrgID, payload.ImageID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), scanTimeout)
+	defer cancel()
+
+	src, err := scan.GetSource(ctx, scan.ImageReference(payload.ImageName))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load image source: %v", err)})
+		return
+	}
+	defer src.Close()
+
+	sbomDocument, sbomData, err := scan.GenerateSBOMDocument(ctx, src)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("generate sbom: %v", err)})
+		return
+	}
+
+	vulnerabilityDocument, err := scan.GenerateVulnerabilityReport(sbomData)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("generate vulnerabilities: %v", err)})
+		return
+	}
+
+	keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
+	sbomKey, err := keyBuilder.BuildSBOMKey()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	vulnerabilityKey, err := keyBuilder.BuildVulnerabilityKey()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var (
+		sbomInfo ObjectResponse
+		vulnInfo ObjectResponse
+	)
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		info, err := h.store.Put(groupCtx, sbomKey, sbomDocument, storage.PutOptions{
+			ContentType: "application/vnd.cyclonedx+json",
+			Metadata: map[string]string{
+				"artifact":   "sbom",
+				"image_name": payload.ImageName,
+			},
+		})
+		if err != nil {
+			return err
 		}
-	}()
-
-	// ==================== SBOM Generation ====================
-	sbom := scan.GetSBOM(src)
-
-	// Save SBOM to file
-	sbomFilePath := "sbom.json"
-	if err := scan.SaveSBOMToFile(sbom, sbomFilePath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to save SBOM: %v", err),
+		sbomInfo = toObjectResponse(info)
+		return nil
+	})
+	group.Go(func() error {
+		info, err := h.store.Put(groupCtx, vulnerabilityKey, vulnerabilityDocument, storage.PutOptions{
+			ContentType: "application/json",
+			Metadata: map[string]string{
+				"artifact":   "vulnerabilities",
+				"image_name": payload.ImageName,
+			},
 		})
+		if err != nil {
+			return err
+		}
+		vulnInfo = toObjectResponse(info)
+		return nil
+	})
+	if err := group.Wait(); err != nil {
+		_ = h.store.Delete(context.Background(), sbomKey)
+		_ = h.store.Delete(context.Background(), vulnerabilityKey)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store scan artifacts: %v", err)})
 		return
 	}
-	defer os.Remove(sbomFilePath)
-
-	// ==================== Vulnerability Scan ====================
-	vulnFilePath, err := scan.GetAllVulnAndUpload(sbom)
-	if err != nil {
-		os.Remove(sbomFilePath)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to generate vulnerabilities: %v", err),
-		})
-		return
-	}
-
-	// ==================== Upload Both Files to S3 ====================
-	ctx := context.Background()
-
-	// Upload SBOM
-	sbomS3Key := fmt.Sprintf("otterxf/%s/%s/sbom.json", orgID, imageID)
-	err = h.S3Client.UploadFile(ctx, h.BucketName, sbomS3Key, sbomFilePath)
-	if err != nil {
-		os.Remove(sbomFilePath)
-		os.Remove(vulnFilePath)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to upload SBOM to S3: %v", err),
-		})
-		return
-	}
-
-	// Upload Vulnerabilities
-	vulnS3Key := fmt.Sprintf("otterxf/%s/%s/vulnerabilities.json", orgID, imageID)
-	err = h.S3Client.UploadFile(ctx, h.BucketName, vulnS3Key, vulnFilePath)
-	if err != nil {
-		os.Remove(sbomFilePath)
-		os.Remove(vulnFilePath)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to upload vulnerabilities to S3: %v", err),
-		})
-		return
-	}
-
-	// ==================== Clean Up Local Files ====================
-	if err := os.Remove(sbomFilePath); err != nil {
-		log.Printf("Warning: failed to delete local SBOM file %s: %v", sbomFilePath, err)
-	}
-	if err := os.Remove(vulnFilePath); err != nil {
-		log.Printf("Warning: failed to delete local vulnerability file %s: %v", vulnFilePath, err)
-	}
-
-	// ==================== Generate Presigned URLs (Optional) ====================
-	sbomPresignedURL, _ := h.S3Client.GetPresignedURL(ctx, h.BucketName, sbomS3Key, time.Hour)
-	vulnPresignedURL, _ := h.S3Client.GetPresignedURL(ctx, h.BucketName, vulnS3Key, time.Hour)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":    "SBOM and vulnerabilities generated and uploaded successfully",
-		"org_id":     orgID,
-		"image_id":   imageID,
-		"image_name": payload.ImageName,
-		"bucket":     h.BucketName,
+		"message":         "SBOM and vulnerabilities generated successfully",
+		"org_id":          orgID,
+		"image_id":        imageID,
+		"image_name":      payload.ImageName,
+		"storage_backend": h.store.Backend(),
 		"files": gin.H{
-			"sbom": gin.H{
-				"s3_key":       sbomS3Key,
-				"download_url": sbomPresignedURL,
-			},
-			"vulnerabilities": gin.H{
-				"s3_key":       vulnS3Key,
-				"download_url": vulnPresignedURL,
-			},
+			"sbom":            sbomInfo,
+			"vulnerabilities": vulnInfo,
 		},
 	})
 }
 
-// GetImageScans lists all scan files for a specific image
 func (h *ScanHandler) GetImageScans(c *gin.Context) {
-	orgID := c.Param("org_id")
-	imageID := c.Param("image_id")
-
-	if orgID == "" || imageID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "org_id and image_id are required",
-		})
+	orgID, imageID, err := normalizeArtifactIDs(c.Param("org_id"), c.Param("image_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx := context.Background()
-	files, err := h.ListImageScans(ctx, orgID, imageID)
+	prefix, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildImagePrefix()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to list scans: %v", err),
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	objects, err := h.store.List(c.Request.Context(), prefix)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("list scans: %v", err)})
+		return
+	}
+
+	keys := make([]string, 0, len(objects))
+	responses := make([]ObjectResponse, 0, len(objects))
+	for _, object := range objects {
+		keys = append(keys, object.Key)
+		responses = append(responses, toObjectResponse(object))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"org_id":   orgID,
-		"image_id": imageID,
-		"files":    files,
-		"count":    len(files),
+		"org_id":          orgID,
+		"image_id":        imageID,
+		"storage_backend": h.store.Backend(),
+		"files":           keys,
+		"objects":         responses,
+		"count":           len(keys),
 	})
 }
 
-// DeleteImageScansHandler deletes all scan files for a specific image
 func (h *ScanHandler) DeleteImageScansHandler(c *gin.Context) {
-	orgID := c.Param("org_id")
-	imageID := c.Param("image_id")
-
-	if orgID == "" || imageID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "org_id and image_id are required",
-		})
+	orgID, imageID, err := normalizeArtifactIDs(c.Param("org_id"), c.Param("image_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx := context.Background()
-	err := h.DeleteImageScans(ctx, orgID, imageID)
+	prefix, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildImagePrefix()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to delete scans: %v", err),
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	objects, err := h.store.List(c.Request.Context(), prefix)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("list scans for delete: %v", err)})
+		return
+	}
+
+	for _, object := range objects {
+		if err := h.store.Delete(c.Request.Context(), object.Key); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("delete scan %s: %v", object.Key, err)})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Scans deleted successfully",
-		"org_id":   orgID,
-		"image_id": imageID,
+		"message":         "Scans deleted successfully",
+		"org_id":          orgID,
+		"image_id":        imageID,
+		"storage_backend": h.store.Backend(),
+		"deleted":         len(objects),
 	})
 }
 
-// DownloadScanFile downloads a specific scan file from S3
 func (h *ScanHandler) DownloadScanFile(c *gin.Context) {
-	orgID := c.Param("org_id")
-	imageID := c.Param("image_id")
-	filename := c.Param("filename")
-
-	if orgID == "" || imageID == "" || filename == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "org_id, image_id, and filename are required",
-		})
-		return
-	}
-
-	s3Key := fmt.Sprintf("otterxf/%s/%s/%s", orgID, imageID, filename)
-	localFile := fmt.Sprintf("/tmp/%s", filename)
-
-	ctx := context.Background()
-	err := h.S3Client.DownloadFile(ctx, h.BucketName, s3Key, localFile)
+	orgID, imageID, err := normalizeArtifactIDs(c.Param("org_id"), c.Param("image_id"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to download file: %v", err),
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	defer os.Remove(localFile)
 
-	c.File(localFile)
+	filename := c.Param("filename")
+	if err := validateDownloadFilename(filename); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	key, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildKey(filename)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	object, err := h.store.Get(c.Request.Context(), key)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "scan file not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("download scan file: %v", err)})
+		return
+	}
+
+	contentType := object.Info.ContentType
+	if contentType == "" {
+		contentType = "application/json"
+	}
+
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, contentType, object.Data)
+}
+
+type ObjectResponse struct {
+	Key         string            `json:"key"`
+	Size        int64             `json:"size"`
+	ContentType string            `json:"content_type"`
+	CreatedAt   time.Time         `json:"created_at"`
+	Backend     string            `json:"backend"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	DownloadURL string            `json:"download_url,omitempty"`
+}
+
+func toObjectResponse(info storage.ObjectInfo) ObjectResponse {
+	return ObjectResponse{
+		Key:         info.Key,
+		Size:        info.Size,
+		ContentType: info.ContentType,
+		CreatedAt:   info.CreatedAt,
+		Backend:     info.Backend,
+		Metadata:    info.Metadata,
+		DownloadURL: info.DownloadURL,
+	}
 }

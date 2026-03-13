@@ -24,69 +24,55 @@ import (
 const defaultImage = "manzilrahul/k8s-custom-controller:latest"
 
 func ImageReference(name string) string {
-	// read an image string reference from the command line or use a default
-	//if len(os.Args) > 1 {
-	//	return os.Args[1]
-	//}
 	return name
 }
 
-func GetSource(input string) source.Source {
-	src, err := syft.GetSource(context.Background(), input, nil)
+func GetSource(ctx context.Context, input string) (source.Source, error) {
+	src, err := syft.GetSource(ctx, input, nil)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("get syft source: %w", err)
 	}
-
-	return src
+	return src, nil
 }
 
-// GetSBOM generates and returns just the SBOM object
-func GetSBOM(src source.Source, defaultTags ...string) *sbom.SBOM {
+func GetSBOM(ctx context.Context, src source.Source, defaultTags ...string) (*sbom.SBOM, error) {
 	cfg := syft.DefaultCreateSBOMConfig()
 
-	sbom, err := syft.CreateSBOM(context.Background(), src, cfg)
+	document, err := syft.CreateSBOM(ctx, src, cfg)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("create sbom: %w", err)
 	}
 
-	return sbom
+	return document, nil
 }
 
-// SaveSBOMToFile converts SBOM to CycloneDX format and saves to file
-func SaveSBOMToFile(sbom *sbom.SBOM, filePath string) error {
-	cyclonedxFormatSbom, err := ToCycloneDxSchema(sbom)
+func GenerateSBOMDocument(ctx context.Context, src source.Source) ([]byte, *sbom.SBOM, error) {
+	document, err := GetSBOM(ctx, src)
 	if err != nil {
-		return fmt.Errorf("failed to convert SBOM to CycloneDX format: %w", err)
+		return nil, nil, err
 	}
 
-	file, err := os.Create(filePath)
+	reader, err := ToCycloneDxSchema(document)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, cyclonedxFormatSbom)
-	if err != nil {
-		os.Remove(filePath)
-		return fmt.Errorf("failed to write SBOM to file: %w", err)
+		return nil, nil, fmt.Errorf("encode cyclonedx sbom: %w", err)
 	}
 
-	return nil
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read encoded sbom: %w", err)
+	}
+
+	return data, document, nil
 }
 
-// GetAllVulnAndUpload scans for vulnerabilities and returns the file path
-func GetAllVulnAndUpload(s *sbom.SBOM) (string, error) {
-	var DefaultOptions = Options{
-		MaxAllowedBuildAge: 120 * time.Hour,
-	}
-	scanner, err := NewScanner(DefaultOptions)
+func GenerateVulnerabilityReport(s *sbom.SBOM) ([]byte, error) {
+	scanner, err := NewScanner(Options{MaxAllowedBuildAge: 120 * time.Hour})
 	if err != nil {
-		return "", fmt.Errorf("failed to create scanner: %w", err)
+		return nil, fmt.Errorf("create grype scanner: %w", err)
 	}
 	fmt.Println("Database built at:", scanner.dbStatus.Built)
 	fmt.Println("Database location:", scanner.dbStatus.Path)
 
-	// Convert Syft packages to Grype packages
 	syftPkgs := s.Artifacts.Packages.Sorted()
 	grypePkgs := grypePkg.FromPackages(syftPkgs, grypePkg.SynthesisConfig{
 		GenerateMissingCPEs: false,
@@ -94,167 +80,27 @@ func GetAllVulnAndUpload(s *sbom.SBOM) (string, error) {
 
 	fmt.Printf("Converted %d packages for vulnerability scanning\n", len(grypePkgs))
 
-	// Create the context for Grype
 	grypeContext := grypePkg.Context{
 		Source: &s.Source,
 		Distro: distro.FromRelease(s.Artifacts.LinuxDistribution, nil),
 	}
 
-	// Perform vulnerability matching
 	matchesCollection, ignoredMatches, err := scanner.vulnerabilityMatcher.FindMatches(grypePkgs, grypeContext)
 	if err != nil {
-		return "", fmt.Errorf("failed to find matches: %w", err)
+		return nil, fmt.Errorf("find vulnerabilities: %w", err)
 	}
 
 	fmt.Printf("Found %d vulnerabilities (%d ignored)\n", matchesCollection.Count(), len(ignoredMatches))
 
-	// Get sorted matches
 	matches := matchesCollection.Sorted()
-
-	// Save vulnerability results
-	vulnFilePath := "vulnerabilities.json"
-	vulnFile, err := os.Create(vulnFilePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to create vulnerability file: %w", err)
-	}
-	defer vulnFile.Close()
-
-	enc := json.NewEncoder(vulnFile)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(matches); err != nil {
-		return "", fmt.Errorf("failed to encode vulnerabilities: %w", err)
+	buffer := new(bytes.Buffer)
+	encoder := json.NewEncoder(buffer)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(matches); err != nil {
+		return nil, fmt.Errorf("encode vulnerabilities: %w", err)
 	}
 
-	fmt.Printf("Vulnerabilities saved to: %s\n", vulnFilePath)
-	return vulnFilePath, nil
-}
-
-func GetSBOMData(src source.Source, defaultTags ...string) sbom.SBOM {
-	// cfg := syft.DefaultCreateSBOMConfig().
-	// 	WithCatalogerSelection(
-	// 		// here you can sub-select, add, remove catalogers from the default selection...
-	// 		// or replace the default selection entirely!
-	// 		cataloging.NewSelectionRequest().
-	// 			WithDefaults(defaultTags...),
-	// 	)
-
-	cfg := syft.DefaultCreateSBOMConfig()
-
-	s, err := syft.CreateSBOM(context.Background(), src, cfg)
-	if err != nil {
-		panic(err)
-	}
-
-	// r, err := ToSpdxSchema(s)
-	r, err := ToCycloneDxSchema(s)
-	if err != nil {
-		panic(err)
-	}
-
-	filePath := "go-spdx.json"
-	file, err := os.Create(filePath) // os.Create truncates if file exists
-	if err != nil {
-		fmt.Printf("Error creating file: %v\n", err)
-		panic(err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			log.Printf("failed to close file: %v", err)
-		}
-	}()
-
-	_, err = io.Copy(file, r)
-	if err != nil {
-		fmt.Printf("Error copying content: %v\n", err)
-		panic(err)
-	}
-	// Now scan for vulnerabilities using Grype
-	var DefaultOptions = Options{
-		MaxAllowedBuildAge: 120 * time.Hour,
-	}
-	scanner, err := NewScanner(DefaultOptions)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("Database built at:", scanner.dbStatus.Built)
-	fmt.Println("Database location:", scanner.dbStatus.Path)
-
-	// Convert Syft packages to Grype packages
-	syftPkgs := s.Artifacts.Packages.Sorted()
-	grypePkgs := grypePkg.FromPackages(syftPkgs, grypePkg.SynthesisConfig{
-		GenerateMissingCPEs: false,
-	})
-
-	fmt.Printf("Converted %d packages for vulnerability scanning\n", len(grypePkgs))
-
-	// Create the context for Grype
-	grypeContext := grypePkg.Context{
-		Source: &s.Source,
-		Distro: distro.FromRelease(s.Artifacts.LinuxDistribution, nil),
-	}
-
-	// Perform vulnerability matching
-	matchesCollection, ignoredMatches, err := scanner.vulnerabilityMatcher.FindMatches(grypePkgs, grypeContext)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("Found %d vulnerabilities (%d ignored)\n", matchesCollection.Count(), len(ignoredMatches))
-
-	// Get sorted matches
-	matches := matchesCollection.Sorted()
-
-	// Save vulnerability results
-	vulnFilePath := "vulnerabilities.json"
-	vulnFile, err := os.Create(vulnFilePath)
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			log.Printf("failed to close file: %v", err)
-		}
-	}()
-
-	// Create structured output
-	type VulnOutput struct {
-		Matches      []interface{} `json:"matches"`
-		MatchCount   int           `json:"matchCount"`
-		IgnoredCount int           `json:"ignoredCount"`
-	}
-
-	vulnOutput := VulnOutput{
-		Matches:      make([]interface{}, len(matches)),
-		MatchCount:   len(matches),
-		IgnoredCount: len(ignoredMatches),
-	}
-
-	for i, m := range matches {
-		vulnOutput.Matches[i] = map[string]interface{}{
-			"vulnerability": map[string]interface{}{
-				"id":        m.Vulnerability.ID,
-				"namespace": m.Vulnerability.Namespace,
-				// "severity":  m.Vulnerability.
-				"fix": m.Vulnerability.Fix,
-			},
-			"package": map[string]interface{}{
-				"name":    m.Package.Name,
-				"version": m.Package.Version,
-				"type":    m.Package.Type,
-				"purl":    m.Package.PURL,
-			},
-		}
-	}
-
-	enc := json.NewEncoder(vulnFile)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(matches); err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("SBOM saved to: %s\n", filePath)
-	fmt.Printf("Vulnerabilities saved to: %s\n", vulnFilePath)
-	return *s
+	return buffer.Bytes(), nil
 }
 
 func ToSyftJSONSchemaRedacted(s *sbom.SBOM) (io.ReadSeeker, error) {
@@ -281,6 +127,7 @@ func ToCycloneDxSchema(s *sbom.SBOM) (io.ReadSeeker, error) {
 	}
 	return bytes.NewReader(buf.Bytes()), nil
 }
+
 func ToSpdxSchema(s *sbom.SBOM) (io.ReadSeeker, error) {
 	buf := new(bytes.Buffer)
 	spdx := spdxhelpers.ToFormatModel(*s)
@@ -294,13 +141,33 @@ func ToSpdxSchema(s *sbom.SBOM) (io.ReadSeeker, error) {
 }
 
 func PrintToTerminal(source io.ReadSeeker) error {
-	// io.Copy efficiently copies data from a source (io.Reader) to a destination (io.Writer).
-	// os.Stdout is an io.Writer that represents the terminal's standard output.
 	_, err := io.Copy(os.Stdout, source)
 	if err != nil {
 		return fmt.Errorf("error copying to stdout: %w", err)
 	}
-	// Add a newline at the end for clean terminal output if desired
 	fmt.Println()
+	return nil
+}
+
+func SaveSBOMToFile(s *sbom.SBOM, filePath string) error {
+	reader, err := ToCycloneDxSchema(s)
+	if err != nil {
+		return fmt.Errorf("convert sbom to cyclonedx: %w", err)
+	}
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("create sbom file: %w", err)
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("failed to close sbom file: %v", err)
+		}
+	}()
+
+	if _, err := io.Copy(file, reader); err != nil {
+		_ = os.Remove(filePath)
+		return fmt.Errorf("write sbom file: %w", err)
+	}
 	return nil
 }

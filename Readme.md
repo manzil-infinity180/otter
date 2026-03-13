@@ -6,6 +6,36 @@ It scans container images generates CycloneDX SBOMs, lists vulnerabilities
 
 https://github.com/user-attachments/assets/60a8e2e2-3fb9-4687-979f-f980c1fbcac2
 
+## Storage backends
+
+Otter now runs locally by default.
+
+- `OTTER_STORAGE=local`: stores scan artifacts in `./data/`
+- `OTTER_STORAGE=postgres`: stores scan artifacts in PostgreSQL with migrations from `db/migrations/`
+- `OTTER_STORAGE=s3`: keeps S3 available as an optional backend
+
+Useful environment variables:
+
+- `OTTER_DATA_DIR`
+- `OTTER_POSTGRES_DSN`
+- `OTTER_POSTGRES_MIGRATIONS`
+- `S3_BUCKET_NAME`
+- `AWS_REGION`
+
+## Local development
+
+Run with local storage:
+
+```bash
+OTTER_STORAGE=local go run .
+```
+
+Run with PostgreSQL via Docker Compose:
+
+```bash
+docker compose up --build
+```
+
 
 
 
