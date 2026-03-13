@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/otterXf/otter/pkg/attestation"
+	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compare"
 	"github.com/otterXf/otter/pkg/registry"
 	"github.com/otterXf/otter/pkg/sbomindex"
@@ -37,6 +38,7 @@ type ImageGeneratePayload struct {
 	Registry  string `json:"registry"`
 	OrgID     string `json:"org_id"`
 	ImageID   string `json:"image_id"`
+	Async     bool   `json:"async"`
 }
 
 type ScanHandler struct {
@@ -46,6 +48,41 @@ type ScanHandler struct {
 	analyzer  scan.ImageAnalyzer
 	attestor  attestation.Fetcher
 	registry  registry.Service
+	jobs      scanJobQueue
+}
+
+type scanJobQueue interface {
+	Enqueue(catalogscan.Request) (catalogscan.Job, error)
+	Get(string) (catalogscan.Job, bool)
+}
+
+type ScanSBOMSummary struct {
+	SourceFormat    string                          `json:"source_format"`
+	PackageCount    int                             `json:"package_count"`
+	LicenseSummary  []sbomindex.LicenseSummaryEntry `json:"license_summary,omitempty"`
+	DependencyRoots []string                        `json:"dependency_roots,omitempty"`
+	DependencyTree  []sbomindex.DependencyNode      `json:"dependency_tree,omitempty"`
+}
+
+type ScanVulnerabilitySummary struct {
+	Summary            vulnindex.Summary             `json:"summary"`
+	FixRecommendations []vulnindex.FixRecommendation `json:"fix_recommendations,omitempty"`
+	Trend              []vulnindex.TrendPoint        `json:"trend,omitempty"`
+}
+
+type ScanExecutionResult struct {
+	Message         string                    `json:"message"`
+	OrgID           string                    `json:"org_id"`
+	ImageID         string                    `json:"image_id"`
+	ImageName       string                    `json:"image_name"`
+	Registry        string                    `json:"registry"`
+	RegistryAuth    string                    `json:"registry_auth"`
+	StorageBackend  string                    `json:"storage_backend"`
+	Summary         scan.VulnerabilitySummary `json:"summary"`
+	SBOM            ScanSBOMSummary           `json:"sbom"`
+	Vulnerabilities ScanVulnerabilitySummary  `json:"vulnerabilities"`
+	Scanners        []string                  `json:"scanners,omitempty"`
+	Files           map[string]ObjectResponse `json:"files,omitempty"`
 }
 
 func NewScanHandler(store storage.Store, sbomIndex sbomindex.Repository, vulnIndex vulnindex.Repository, analyzer scan.ImageAnalyzer) *ScanHandler {
@@ -66,6 +103,10 @@ func NewScanHandlerWithRegistry(store storage.Store, sbomIndex sbomindex.Reposit
 	}
 }
 
+func (h *ScanHandler) SetJobQueue(queue scanJobQueue) {
+	h.jobs = queue
+}
+
 func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 	var payload ImageGeneratePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -73,72 +114,142 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		return
 	}
 
-	if err := validateImageReference(payload.ImageName); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if payload.Async || strings.EqualFold(c.Query("async"), "true") {
+		request, err := catalogscan.NewRequest(payload.OrgID, payload.ImageID, payload.ImageName, payload.Registry, catalogscan.SourceAPI, catalogscan.TriggerManual)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if h.jobs == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan job queue is not configured"})
+			return
+		}
+		job, err := h.jobs.Enqueue(request)
+		if err != nil {
+			status := http.StatusServiceUnavailable
+			if errors.Is(err, catalogscan.ErrQueueFull) {
+				status = http.StatusTooManyRequests
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"message":    "scan queued successfully",
+			"job":        job,
+			"status_url": "/api/v1/scan-jobs/" + job.ID,
+		})
 		return
 	}
-	if err := validateRequestedRegistry(payload.ImageName, payload.Registry); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+
+	result, err := h.executeScan(c.Request.Context(), payload)
+	if err != nil {
+		h.renderScanExecutionError(c, err)
 		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *ScanHandler) GetScanJob(c *gin.Context) {
+	if h.jobs == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan job queue is not configured"})
+		return
+	}
+
+	jobID := strings.TrimSpace(c.Param("id"))
+	if jobID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scan job id is required"})
+		return
+	}
+
+	job, ok := h.jobs.Get(jobID)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "scan job not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"job":             job,
+		"storage_backend": h.store.Backend(),
+	})
+}
+
+func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Request) (catalogscan.Result, error) {
+	result, err := h.executeScan(ctx, ImageGeneratePayload{
+		ImageName: req.ImageName,
+		Registry:  req.Registry,
+		OrgID:     req.OrgID,
+		ImageID:   req.ImageID,
+	})
+	if err != nil {
+		return catalogscan.Result{}, err
+	}
+
+	return catalogscan.Result{
+		OrgID:       result.OrgID,
+		ImageID:     result.ImageID,
+		ImageName:   result.ImageName,
+		Registry:    result.Registry,
+		Scanners:    append([]string(nil), result.Scanners...),
+		Summary:     result.Summary,
+		CompletedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayload) (ScanExecutionResult, error) {
+	if err := validateImageReference(payload.ImageName); err != nil {
+		return ScanExecutionResult{}, err
+	}
+	if err := validateRequestedRegistry(payload.ImageName, payload.Registry); err != nil {
+		return ScanExecutionResult{}, err
 	}
 
 	orgID, imageID, err := normalizeArtifactIDs(payload.OrgID, payload.ImageID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return ScanExecutionResult{}, err
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), scanTimeout)
+	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
 
 	imageAccess, err := h.registry.PrepareImage(ctx, payload.ImageName)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("prepare image pull: %v", err)})
-		return
+		return ScanExecutionResult{}, fmt.Errorf("prepare image pull: %w", err)
 	}
 	ctx = scan.ContextWithRegistryOptions(ctx, imageAccess.RegistryOptions)
 
 	result, err := h.analyzer.Analyze(ctx, payload.ImageName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("analyze image: %v", err)})
-		return
+		return ScanExecutionResult{}, fmt.Errorf("analyze image: %w", err)
 	}
 	record, err := sbomindex.BuildRecordFromSyft(orgID, imageID, payload.ImageName, result.SBOMData)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("index sbom: %v", err)})
-		return
+		return ScanExecutionResult{}, fmt.Errorf("index sbom: %w", err)
 	}
 	existingVulnerabilities, err := h.getExistingVulnerabilityRecord(ctx, orgID, imageID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load vulnerability history: %v", err)})
-		return
+		return ScanExecutionResult{}, fmt.Errorf("load vulnerability history: %w", err)
 	}
 	vulnerabilityRecord, err := vulnindex.BuildRecordFromReport(orgID, imageID, payload.ImageName, result.CombinedReport, existingVulnerabilities, vulnindex.BuildOptions{TrackTrend: true})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("index vulnerabilities: %v", err)})
-		return
+		return ScanExecutionResult{}, fmt.Errorf("index vulnerabilities: %w", err)
 	}
 
 	keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
 	sbomKey, err := keyBuilder.BuildSBOMKey()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return ScanExecutionResult{}, err
 	}
 	cycloneDXKey, err := keyBuilder.BuildSBOMKeyForFormat(sbomindex.FormatCycloneDX)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return ScanExecutionResult{}, err
 	}
 	spdxKey, err := keyBuilder.BuildSBOMKeyForFormat(sbomindex.FormatSPDX)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return ScanExecutionResult{}, err
 	}
 	vulnerabilityKey, err := keyBuilder.BuildVulnerabilityKey()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return ScanExecutionResult{}, err
 	}
 
 	type artifactUpload struct {
@@ -198,8 +309,7 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 	for _, report := range result.ScannerReports {
 		key, err := keyBuilder.BuildScannerVulnerabilityKey(report.Scanner)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+			return ScanExecutionResult{}, err
 		}
 		uploads = append(uploads, artifactUpload{
 			ResponseName: scannerResponseKey(report.Scanner),
@@ -214,7 +324,7 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		})
 	}
 
-	storedFiles := make(gin.H, len(uploads))
+	storedFiles := make(map[string]ObjectResponse, len(uploads))
 	storedKeys := make([]string, 0, len(uploads))
 	var mu sync.Mutex
 
@@ -240,16 +350,14 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		for _, key := range storedKeys {
 			_ = h.store.Delete(context.Background(), key)
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store scan artifacts: %v", err)})
-		return
+		return ScanExecutionResult{}, fmt.Errorf("store scan artifacts: %w", err)
 	}
 	record, err = h.sbomIndex.Save(ctx, record)
 	if err != nil {
 		for _, key := range storedKeys {
 			_ = h.store.Delete(context.Background(), key)
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store sbom index: %v", err)})
-		return
+		return ScanExecutionResult{}, fmt.Errorf("store sbom index: %w", err)
 	}
 	vulnerabilityRecord, err = h.vulnIndex.Save(ctx, vulnerabilityRecord)
 	if err != nil {
@@ -257,8 +365,7 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			_ = h.store.Delete(context.Background(), key)
 		}
 		_ = h.sbomIndex.Delete(context.Background(), orgID, imageID)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store vulnerability index: %v", err)})
-		return
+		return ScanExecutionResult{}, fmt.Errorf("store vulnerability index: %w", err)
 	}
 
 	scanners := make([]string, 0, len(result.ScannerReports))
@@ -266,30 +373,43 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		scanners = append(scanners, report.Scanner)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":         "SBOM and vulnerabilities generated successfully",
-		"org_id":          orgID,
-		"image_id":        imageID,
-		"image_name":      payload.ImageName,
-		"registry":        imageAccess.Registry,
-		"registry_auth":   imageAccess.AuthSource,
-		"storage_backend": h.store.Backend(),
-		"summary":         result.Summary,
-		"sbom": gin.H{
-			"source_format":    record.SourceFormat,
-			"package_count":    record.PackageCount,
-			"license_summary":  record.LicenseSummary,
-			"dependency_roots": record.DependencyRoots,
-			"dependency_tree":  record.DependencyTree,
+	return ScanExecutionResult{
+		Message:        "SBOM and vulnerabilities generated successfully",
+		OrgID:          orgID,
+		ImageID:        imageID,
+		ImageName:      payload.ImageName,
+		Registry:       imageAccess.Registry,
+		RegistryAuth:   imageAccess.AuthSource,
+		StorageBackend: h.store.Backend(),
+		Summary:        result.Summary,
+		SBOM: ScanSBOMSummary{
+			SourceFormat:    record.SourceFormat,
+			PackageCount:    record.PackageCount,
+			LicenseSummary:  record.LicenseSummary,
+			DependencyRoots: record.DependencyRoots,
+			DependencyTree:  record.DependencyTree,
 		},
-		"vulnerabilities": gin.H{
-			"summary":             vulnerabilityRecord.Summary,
-			"fix_recommendations": vulnerabilityRecord.FixRecommendations,
-			"trend":               vulnerabilityRecord.Trend,
+		Vulnerabilities: ScanVulnerabilitySummary{
+			Summary:            vulnerabilityRecord.Summary,
+			FixRecommendations: vulnerabilityRecord.FixRecommendations,
+			Trend:              vulnerabilityRecord.Trend,
 		},
-		"scanners": scanners,
-		"files":    storedFiles,
-	})
+		Scanners: scanners,
+		Files:    storedFiles,
+	}, nil
+}
+
+func (h *ScanHandler) renderScanExecutionError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": err.Error()})
+	case strings.Contains(err.Error(), "prepare image pull:"):
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+	case strings.Contains(err.Error(), "invalid image_name"), strings.Contains(err.Error(), "invalid org_id"), strings.Contains(err.Error(), "invalid image_id"), strings.Contains(err.Error(), "registry "):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	}
 }
 
 func (h *ScanHandler) GetImageScans(c *gin.Context) {

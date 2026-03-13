@@ -17,6 +17,7 @@ import (
 
 	"github.com/otterXf/otter/pkg/api"
 	otteraws "github.com/otterXf/otter/pkg/aws"
+	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/registry"
 	"github.com/otterXf/otter/pkg/routes"
 	"github.com/otterXf/otter/pkg/sbomindex"
@@ -62,7 +63,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("build registry manager: %v", err)
 	}
+	catalogScanConfig := catalogscan.ConfigFromEnv()
 	scanHandler := api.NewScanHandlerWithRegistry(store, sbomRepository, vulnerabilityRepository, analyzer, registryManager)
+	jobQueue := catalogscan.NewQueue(scanHandler, catalogScanConfig, log.Default())
+	jobQueue.Start(ctx)
+	catalogscan.NewScheduler(jobQueue, catalogScanConfig, log.Default()).Start(ctx)
+	scanHandler.SetJobQueue(jobQueue)
 	handlers := &routes.Handlers{ScanHandler: scanHandler}
 
 	router := gin.New()

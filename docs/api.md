@@ -53,7 +53,8 @@ Request body:
   "image_name": "alpine:latest",
   "registry": "index.docker.io",
   "org_id": "default_org",
-  "image_id": "alpine-latest"
+  "image_id": "alpine-latest",
+  "async": false
 }
 ```
 
@@ -70,6 +71,23 @@ Behavior:
   - `vulnerabilities.json`
   - per-scanner vulnerability reports
 - Indexes packages, license summary, and dependency tree for image-level SBOM APIs.
+
+Async mode:
+
+- set `"async": true` or `?async=true` to hand the scan to the background worker
+- returns `202 Accepted` with a job record and `status_url`
+- the worker queue is also used by the built-in catalog scheduler
+
+## Get async scan job status
+
+`GET /api/v1/scan-jobs/:id`
+
+Returns the current job state for an async scan request, including:
+
+- pending, running, succeeded, or failed status
+- original scan request payload
+- completion timestamps
+- vulnerability summary and scanner list when the job succeeds
 
 ## List scan artifacts
 
@@ -137,6 +155,7 @@ Response includes:
 - indexed image list with parsed registry, repository, tag, and digest fields
 - package counts, license summary, and vulnerability summary per image
 - scanner attribution and last updated time
+- the seeded catalog scans appear under `org_id=catalog` by default
 
 Otter also exposes HTML browse fallbacks at:
 

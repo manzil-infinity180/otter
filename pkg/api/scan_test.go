@@ -16,6 +16,7 @@ import (
 	syftpkg "github.com/anchore/syft/syft/pkg"
 	syftsbom "github.com/anchore/syft/syft/sbom"
 	"github.com/otterXf/otter/pkg/attestation"
+	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
@@ -38,6 +39,21 @@ type stubAttestationFetcher struct {
 
 func (s stubAttestationFetcher) Discover(context.Context, string) (attestation.Result, error) {
 	return s.result, s.err
+}
+
+type stubJobQueue struct {
+	job catalogscan.Job
+}
+
+func (s stubJobQueue) Enqueue(catalogscan.Request) (catalogscan.Job, error) {
+	return s.job, nil
+}
+
+func (s stubJobQueue) Get(jobID string) (catalogscan.Job, bool) {
+	if s.job.ID != jobID {
+		return catalogscan.Job{}, false
+	}
+	return s.job, true
 }
 
 func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.T) {
@@ -143,6 +159,127 @@ func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.
 	}
 	if got, want := vulnerabilities.Summary.Total, 1; got != want {
 		t.Fatalf("vulnerabilities.Summary.Total = %d, want %d", got, want)
+	}
+}
+
+func TestGenerateScanSbomVulQueuesAsyncJobs(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
+	handler.SetJobQueue(stubJobQueue{
+		job: catalogscan.Job{
+			ID:        "scanjob-1234",
+			Status:    catalogscan.StatusPending,
+			Request:   catalogscan.Request{OrgID: "catalog", ImageID: "alpine-job", ImageName: "alpine:latest"},
+			CreatedAt: time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC),
+		},
+	})
+
+	router := gin.New()
+	router.POST("/api/v1/scans", handler.GenerateScanSbomVul)
+
+	body, err := json.Marshal(ImageGeneratePayload{
+		ImageName: "alpine:latest",
+		OrgID:     "catalog",
+		ImageID:   "alpine-job",
+		Async:     true,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/scans", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusAccepted; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var payload struct {
+		StatusURL string `json:"status_url"`
+		Job       struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"job"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Job.ID != "scanjob-1234" || payload.Job.Status != catalogscan.StatusPending {
+		t.Fatalf("payload.Job = %#v", payload.Job)
+	}
+	if payload.StatusURL != "/api/v1/scan-jobs/scanjob-1234" {
+		t.Fatalf("payload.StatusURL = %q", payload.StatusURL)
+	}
+}
+
+func TestGetScanJobReturnsQueuedJob(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
+	handler.SetJobQueue(stubJobQueue{
+		job: catalogscan.Job{
+			ID:        "scanjob-queued",
+			Status:    catalogscan.StatusRunning,
+			Request:   catalogscan.Request{OrgID: "catalog", ImageID: "nginx-job", ImageName: "nginx:latest"},
+			CreatedAt: time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC),
+		},
+	})
+
+	router := gin.New()
+	router.GET("/api/v1/scan-jobs/:id", handler.GetScanJob)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs/scanjob-queued", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var payload struct {
+		Job struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"job"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Job.ID != "scanjob-queued" || payload.Job.Status != catalogscan.StatusRunning {
+		t.Fatalf("payload.Job = %#v", payload.Job)
 	}
 }
 

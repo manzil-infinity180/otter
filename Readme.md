@@ -33,6 +33,14 @@ Useful environment variables:
 - `OTTER_COSIGN_PUBLIC_KEY`
 - `OTTER_COSIGN_IDENTITY_REGEXP`
 - `OTTER_COSIGN_OIDC_ISSUER_REGEXP`
+- `OTTER_CATALOG_SCANNER_ENABLED`
+- `OTTER_CATALOG_SCANNER_INTERVAL`
+- `OTTER_CATALOG_SCANNER_TIMEOUT`
+- `OTTER_CATALOG_SCANNER_WORKERS`
+- `OTTER_CATALOG_SCANNER_QUEUE_SIZE`
+- `OTTER_CATALOG_SCANNER_JOB_HISTORY_LIMIT`
+- `OTTER_CATALOG_SCANNER_ORG_ID`
+- `OTTER_CATALOG_SCANNER_IMAGES`
 - `S3_BUCKET_NAME`
 - `AWS_REGION`
 
@@ -57,6 +65,8 @@ curl -X POST http://localhost:7789/api/v1/registries \
 ```
 
 Otter uses configured registry settings to preflight image access before each scan and throttles registry API pulls per host. If no explicit registry configuration exists, public images still fall back to the default Docker keychain behavior.
+
+The background catalog worker is enabled by default and seeds the local catalog with common base images under the `catalog` org. Disable it with `OTTER_CATALOG_SCANNER_ENABLED=false` if you only want manual scans.
 
 Build and test the React frontend:
 
@@ -109,6 +119,37 @@ The attestation response includes:
 - signatures discovered through OCI referrers plus `cosign verify` status
 - in-toto and DSSE attestations with parsed SLSA provenance summaries
 - signer, issuer, timestamp, predicate type, and statement subjects when present
+
+## Automated catalog scanning
+
+Otter now includes a local-first catalog scan pipeline backed by an in-process worker queue.
+
+- The worker accepts async scan requests via `POST /api/v1/scans` with `"async": true`.
+- Job status is available at `GET /api/v1/scan-jobs/:id`.
+- A scheduler enqueues a default image set on boot and then repeats on `OTTER_CATALOG_SCANNER_INTERVAL`.
+- Re-scans reuse stable `org_id` and `image_id` values, so vulnerability trend snapshots continue to build over time.
+
+Default seeded image refs:
+
+- `alpine:latest`
+- `alpine:3.19`
+- `debian:latest`
+- `debian:12-slim`
+- `ubuntu:latest`
+- `ubuntu:24.04`
+- `nginx:latest`
+- `nginx:1.27`
+- `python:latest`
+- `python:3.12`
+- `golang:latest`
+- `golang:1.24`
+- `cgr.dev/chainguard/static:latest`
+
+Override the catalog list with a comma-separated value:
+
+```bash
+OTTER_CATALOG_SCANNER_IMAGES="alpine:latest,nginx:latest,cgr.dev/chainguard/static:latest" go run .
+```
 
 
 
