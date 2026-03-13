@@ -3,6 +3,7 @@ package sbomindex
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -195,5 +196,41 @@ ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestPostgresRepositoryErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := newPostgresRepositoryWithDB(db)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+FROM sbom_indexes
+WHERE org_id = $1 AND image_id = $2;
+`)).
+		WithArgs("demo-org", "missing").
+		WillReturnError(sql.ErrNoRows)
+	if _, err := repo.Get(context.Background(), "demo-org", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get() error = %v, want ErrNotFound", err)
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+FROM sbom_indexes
+ORDER BY updated_at DESC, org_id ASC, image_id ASC;
+`)).
+		WillReturnError(errors.New("query failed"))
+	if _, err := repo.List(context.Background()); err == nil {
+		t.Fatal("expected List() to return query errors")
+	}
+
+	if err := (&PostgresRepository{}).Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 }

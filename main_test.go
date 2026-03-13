@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -133,5 +135,84 @@ func TestBuildStoreRejectsUnsupportedBackend(t *testing.T) {
 
 	if _, err := buildStore(context.Background()); err == nil {
 		t.Fatal("expected buildStore() to fail for unsupported backend")
+	}
+}
+
+func TestBuildIndexRepositoriesRejectUnsupportedBackend(t *testing.T) {
+	t.Setenv("OTTER_STORAGE", "unsupported")
+
+	if _, err := buildSBOMRepository(context.Background()); err == nil {
+		t.Fatal("expected buildSBOMRepository() to fail for unsupported backend")
+	}
+	if _, err := buildVulnerabilityRepository(context.Background()); err == nil {
+		t.Fatal("expected buildVulnerabilityRepository() to fail for unsupported backend")
+	}
+}
+
+func TestBuildAnalyzerIncludesTrivyWhenEnabled(t *testing.T) {
+	t.Setenv("OTTER_TRIVY_ENABLED", "true")
+	t.Setenv("OTTER_TRIVY_SERVER_URL", "http://trivy:4954")
+
+	if analyzer := buildAnalyzer(); analyzer == nil {
+		t.Fatal("buildAnalyzer() returned nil")
+	}
+}
+
+func TestBuildRepositoriesUseLocalIndexesForS3Mode(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("OTTER_STORAGE", storage.BackendS3)
+	t.Setenv("OTTER_DATA_DIR", dataDir)
+
+	sbomRepo, err := buildSBOMRepository(context.Background())
+	if err != nil {
+		t.Fatalf("buildSBOMRepository() error = %v", err)
+	}
+	defer sbomRepo.Close()
+
+	vulnRepo, err := buildVulnerabilityRepository(context.Background())
+	if err != nil {
+		t.Fatalf("buildVulnerabilityRepository() error = %v", err)
+	}
+	defer vulnRepo.Close()
+}
+
+func TestBuildPostgresDependenciesReturnConnectionErrors(t *testing.T) {
+	t.Setenv("OTTER_STORAGE", storage.BackendPostgres)
+	t.Setenv("OTTER_POSTGRES_DSN", "postgres://otter:otter@127.0.0.1:1/otter?sslmode=disable")
+	t.Setenv("OTTER_POSTGRES_MIGRATIONS", t.TempDir())
+
+	if _, err := buildStore(context.Background()); err == nil {
+		t.Fatal("expected buildStore() to fail for unreachable postgres")
+	}
+	if _, err := buildSBOMRepository(context.Background()); err == nil {
+		t.Fatal("expected buildSBOMRepository() to fail for unreachable postgres")
+	}
+	if _, err := buildVulnerabilityRepository(context.Background()); err == nil {
+		t.Fatal("expected buildVulnerabilityRepository() to fail for unreachable postgres")
+	}
+}
+
+func TestBuildRegistryManagerReturnsFilesystemErrors(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(filePath, []byte("otter"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	t.Setenv("OTTER_DATA_DIR", filePath)
+	if _, err := buildRegistryManager(); err == nil {
+		t.Fatal("expected buildRegistryManager() to fail when OTTER_DATA_DIR is a file")
+	}
+}
+
+func TestBuildStoreReturnsFilesystemErrorsForLocalMode(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(filePath, []byte("otter"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	t.Setenv("OTTER_STORAGE", storage.BackendLocal)
+	t.Setenv("OTTER_DATA_DIR", filePath)
+	if _, err := buildStore(context.Background()); err == nil {
+		t.Fatal("expected buildStore() to fail when OTTER_DATA_DIR is a file")
 	}
 }

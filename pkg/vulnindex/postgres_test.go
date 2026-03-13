@@ -3,6 +3,7 @@ package vulnindex
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -138,5 +139,38 @@ func TestPostgresRepositoryRejectsInvalidKey(t *testing.T) {
 	repo := newPostgresRepositoryWithDB(&sql.DB{})
 	if _, err := repo.Save(context.Background(), Record{OrgID: "../bad", ImageID: "demo-image"}); err == nil {
 		t.Fatal("expected Save() to reject invalid org ID")
+	}
+}
+
+func TestPostgresRepositoryErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := newPostgresRepositoryWithDB(db)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT image_name, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
+FROM vulnerability_indexes
+WHERE org_id = $1 AND image_id = $2;
+`)).
+		WithArgs("demo-org", "missing").
+		WillReturnError(sql.ErrNoRows)
+	if _, err := repo.Get(context.Background(), "demo-org", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get() error = %v, want ErrNotFound", err)
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM vulnerability_indexes WHERE org_id = $1 AND image_id = $2`)).
+		WithArgs("demo-org", "demo-image").
+		WillReturnError(errors.New("delete failed"))
+	if err := repo.Delete(context.Background(), "demo-org", "demo-image"); err == nil {
+		t.Fatal("expected Delete() to return database errors")
+	}
+
+	if err := (&PostgresRepository{}).Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 }

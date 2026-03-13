@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -110,6 +111,42 @@ func TestListRegistriesEndpoint(t *testing.T) {
 	}
 	if !bytes.Contains(resp.Body.Bytes(), []byte(`"ghcr.io"`)) {
 		t.Fatalf("expected registry listing in response, body=%s", resp.Body.String())
+	}
+}
+
+func TestRegistryEndpointsReturnErrors(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	handler := NewScanHandlerWithRegistry(mustLocalStore(t), mustLocalSBOMRepo(t), mustLocalVulnRepo(t), stubAnalyzer{}, stubRegistryService{
+		configureErr: errors.New("invalid credentials"),
+		listErr:      errors.New("storage unavailable"),
+	})
+	router := gin.New()
+	router.POST("/api/v1/registries", handler.ConfigureRegistry)
+	router.GET("/api/v1/registries", handler.ListRegistries)
+
+	badJSON := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/registries", bytes.NewReader([]byte(`{`)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(badJSON, req)
+	if got, want := badJSON.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, badJSON.Body.String())
+	}
+
+	configureErr := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/registries", bytes.NewReader([]byte(`{"registry":"ghcr.io","auth_mode":"explicit","token":"secret"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(configureErr, req)
+	if got, want := configureErr.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, configureErr.Body.String())
+	}
+
+	listErr := httptest.NewRecorder()
+	router.ServeHTTP(listErr, httptest.NewRequest(http.MethodGet, "/api/v1/registries", nil))
+	if got, want := listErr.Code, http.StatusInternalServerError; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, listErr.Body.String())
 	}
 }
 
