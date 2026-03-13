@@ -3,9 +3,9 @@ import clsx from "clsx";
 import { startTransition, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
-import { compareImages, getAttestations, getOverview, getSbom, getVulnerabilities, listCatalog } from "../lib/api";
+import { compareImages, getAttestations, getComparisonExportURL, getImageExportURL, getOverview, getSbom, getVulnerabilities, listCatalog } from "../lib/api";
 import { buildDependencyChildren, formatBytes, formatTimestamp, vulnerabilityChips } from "../lib/format";
-import type { CatalogItem, DependencyNode, OverviewResponse, Severity, VulnerabilityRecord } from "../lib/types";
+import type { CatalogItem, DependencyNode, ImageExportFormat, OverviewResponse, Severity, VulnerabilityRecord } from "../lib/types";
 import { EmptyState } from "../components/empty-state";
 import { SeverityPill } from "../components/severity-pill";
 import { StatCard } from "../components/stat-card";
@@ -15,6 +15,13 @@ type TabKey = (typeof tabs)[number];
 
 const severityFilterOptions: Array<"" | Severity> = ["", "CRITICAL", "HIGH", "MEDIUM", "LOW", "NEGLIGIBLE"];
 const statusFilterOptions = ["", "affected", "not_affected", "fixed", "under_investigation"];
+const imageExportOptions: Array<{ format: ImageExportFormat; label: string; description: string }> = [
+  { format: "cyclonedx", label: "Export CycloneDX", description: "Raw SBOM JSON" },
+  { format: "spdx", label: "Export SPDX", description: "SPDX 2.3 JSON" },
+  { format: "json", label: "Export Vulnerabilities JSON", description: "Structured report" },
+  { format: "csv", label: "Export CSV", description: "Spreadsheet-friendly" },
+  { format: "sarif", label: "Export SARIF", description: "GitHub code scanning" }
+];
 
 export function ImageDetailPage() {
   const { orgId = "", imageId = "" } = useParams();
@@ -213,6 +220,22 @@ export function ImageDetailPage() {
                 </div>
               </div>
               <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
+                <h2 className="font-display text-2xl text-ink-900 dark:text-white">Exports</h2>
+                <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">Download SBOMs and vulnerability reports in formats suited for archives, spreadsheets, and security tooling.</p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  {imageExportOptions.map((item) => (
+                    <a
+                      key={item.format}
+                      href={getImageExportURL(overview.org_id, overview.image_id, item.format)}
+                      className="rounded-[1.5rem] border border-ink-200 bg-white/80 px-4 py-4 text-sm transition hover:border-sky-400 hover:text-sky-700 dark:border-ink-800 dark:bg-ink-950/50 dark:hover:border-sky-600 dark:hover:text-sky-300"
+                    >
+                      <span className="block font-medium text-ink-900 dark:text-white">{item.label}</span>
+                      <span className="mt-1 block text-xs text-ink-500 dark:text-ink-400">{item.description}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
                 <h2 className="font-display text-2xl text-ink-900 dark:text-white">Artifacts</h2>
                 <div className="mt-4 overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
@@ -333,6 +356,14 @@ export function ImageDetailPage() {
                       <StatCard label="Package delta" value={comparisonMutation.data.comparison.summary.package_delta} />
                       <StatCard label="Vulnerability delta" value={comparisonMutation.data.comparison.summary.vulnerability_delta} />
                       <StatCard label="Changed layers" value={comparisonMutation.data.comparison.summary.changed_layer_delta} />
+                    </div>
+                    <div className="mt-5">
+                      <a
+                        href={getComparisonExportURL(comparisonMutation.data.comparison_id)}
+                        className="inline-flex rounded-full bg-ink-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-ink-900"
+                      >
+                        Download comparison JSON
+                      </a>
                     </div>
                   </section>
                   <section className="grid gap-4 xl:grid-cols-3">

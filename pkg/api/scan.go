@@ -20,6 +20,7 @@ import (
 	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compare"
 	"github.com/otterXf/otter/pkg/registry"
+	reportexport "github.com/otterXf/otter/pkg/reportexport"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
@@ -525,8 +526,117 @@ func (h *ScanHandler) DownloadScanFile(c *gin.Context) {
 		contentType = "application/json"
 	}
 
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	c.Data(http.StatusOK, contentType, object.Data)
+	writeAttachment(c, filename, contentType, object.Data)
+}
+
+func (h *ScanHandler) ExportImage(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	format, err := normalizeImageExportFormat(c.Query("format"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	switch format {
+	case sbomindex.FormatCycloneDX, sbomindex.FormatSPDX:
+		keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
+		object, err := h.getSBOMArtifact(c.Request.Context(), keyBuilder, format)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "sbom document not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("get sbom export: %v", err)})
+			return
+		}
+
+		filename, err := buildImageExportFilename(orgID, imageID, "sbom", format)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		contentType := object.Info.ContentType
+		if contentType == "" {
+			contentType = "application/json"
+		}
+		writeAttachment(c, filename, contentType, object.Data)
+		return
+	case reportexport.FormatCSV, reportexport.FormatJSON, reportexport.FormatSARIF:
+		record, err := h.getOrCreateVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability report not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load vulnerability export: %v", err)})
+			return
+		}
+
+		var (
+			document    []byte
+			contentType string
+		)
+		switch format {
+		case reportexport.FormatCSV:
+			document, err = reportexport.MarshalVulnerabilitiesCSV(record)
+			contentType = "text/csv; charset=utf-8"
+		case reportexport.FormatSARIF:
+			document, err = reportexport.MarshalVulnerabilitiesSARIF(record)
+			contentType = "application/sarif+json"
+		default:
+			document, err = reportexport.MarshalVulnerabilitiesJSON(record)
+			contentType = "application/json"
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build %s export: %v", format, err)})
+			return
+		}
+
+		filename, err := buildImageExportFilename(orgID, imageID, "vulnerabilities", format)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		writeAttachment(c, filename, contentType, document)
+		return
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("unsupported export format %q", format)})
+	}
+}
+
+func (h *ScanHandler) ExportComparison(c *gin.Context) {
+	comparisonID := strings.TrimSpace(c.Param("id"))
+	key, err := BuildComparisonKey(comparisonID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	object, err := h.store.Get(c.Request.Context(), key)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "comparison report not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load comparison export: %v", err)})
+		return
+	}
+
+	filename, err := buildComparisonExportFilename(comparisonID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	contentType := object.Info.ContentType
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	writeAttachment(c, filename, contentType, object.Data)
 }
 
 func (h *ScanHandler) GetImageSBOM(c *gin.Context) {
@@ -1196,4 +1306,52 @@ func buildVEXFilename(header *multipart.FileHeader, importedAt time.Time) (strin
 		return "", err
 	}
 	return filename, nil
+}
+
+func normalizeImageExportFormat(value string) (string, error) {
+	format := strings.ToLower(strings.TrimSpace(value))
+	switch format {
+	case "":
+		return "", fmt.Errorf("format is required")
+	case sbomindex.FormatCycloneDX, sbomindex.FormatSPDX, reportexport.FormatCSV, reportexport.FormatJSON, reportexport.FormatSARIF:
+		return format, nil
+	default:
+		return "", fmt.Errorf("unsupported export format %q", value)
+	}
+}
+
+func buildImageExportFilename(orgID, imageID, artifact, format string) (string, error) {
+	var filename string
+	switch artifact {
+	case "sbom":
+		filename = fmt.Sprintf("%s-%s-sbom-%s.json", orgID, imageID, format)
+	case "vulnerabilities":
+		switch format {
+		case reportexport.FormatCSV:
+			filename = fmt.Sprintf("%s-%s-vulnerabilities.csv", orgID, imageID)
+		case reportexport.FormatSARIF:
+			filename = fmt.Sprintf("%s-%s-vulnerabilities.sarif", orgID, imageID)
+		default:
+			filename = fmt.Sprintf("%s-%s-vulnerabilities.json", orgID, imageID)
+		}
+	default:
+		return "", fmt.Errorf("unsupported export artifact %q", artifact)
+	}
+	if err := validateDownloadFilename(filename); err != nil {
+		return "", err
+	}
+	return filename, nil
+}
+
+func buildComparisonExportFilename(comparisonID string) (string, error) {
+	filename := fmt.Sprintf("comparison-%s.json", comparisonID)
+	if err := validateDownloadFilename(filename); err != nil {
+		return "", err
+	}
+	return filename, nil
+}
+
+func writeAttachment(c *gin.Context, filename, contentType string, data []byte) {
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, contentType, data)
 }

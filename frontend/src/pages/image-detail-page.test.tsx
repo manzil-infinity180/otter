@@ -193,6 +193,45 @@ describe("ImageDetailPage", () => {
         };
       }
 
+      if (url.includes("/api/v1/compare")) {
+        return {
+          ok: true,
+          json: async () => ({
+            comparison_id: "comparison-123",
+            comparison: {
+              id: "comparison-123",
+              summary: {
+                message: "Image B has 1 fewer vulns and 2 fewer packages",
+                package_delta: -2,
+                vulnerability_delta: -1,
+                changed_layer_delta: 1,
+                image2_fewer_packages: 2,
+                image2_fewer_vulnerabilities: 1
+              },
+              package_diff: {
+                added: [],
+                removed: [],
+                changed: []
+              },
+              vulnerability_diff: {
+                new: [],
+                fixed: [],
+                unchanged: []
+              },
+              layer_diff: {
+                image1_count: 4,
+                image2_count: 3
+              },
+              sbom_diff: {
+                components_added: 0,
+                components_removed: 0,
+                components_changed: 0
+              }
+            }
+          })
+        };
+      }
+
       throw new Error(`Unhandled request ${url}`);
     }) as typeof fetch;
   });
@@ -209,5 +248,30 @@ describe("ImageDetailPage", () => {
     await waitFor(() => expect(screen.getByText("CVE-2024-0001")).toBeInTheDocument());
     expect(screen.getByRole("tab", { name: "Vulnerabilities" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("busybox 1.36.1")).toBeInTheDocument();
+  });
+
+  it("renders export links for image and comparison downloads", async () => {
+    const user = userEvent.setup();
+    renderImagePage();
+
+    await waitFor(() => expect(screen.getByRole("link", { name: /Export SARIF/ })).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /Export CycloneDX/ })).toHaveAttribute(
+      "href",
+      expect.stringContaining("/api/v1/images/image-a/export?org_id=demo-org&format=cyclonedx")
+    );
+    expect(screen.getByRole("link", { name: /Export SARIF/ })).toHaveAttribute(
+      "href",
+      expect.stringContaining("/api/v1/images/image-a/export?org_id=demo-org&format=sarif")
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Comparison" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Comparison target" }), "demo-org/image-b");
+    await user.click(screen.getByRole("button", { name: "Run comparison" }));
+
+    await waitFor(() => expect(screen.getByRole("link", { name: "Download comparison JSON" })).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Download comparison JSON" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("/api/v1/comparisons/comparison-123/export")
+    );
   });
 });

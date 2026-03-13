@@ -1,4 +1,5 @@
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "NEGLIGIBLE" | "UNKNOWN";
+export type ImageExportFormat = "cyclonedx" | "spdx" | "json" | "csv" | "sarif";
 
 export interface LicenseSummaryEntry {
   license: string;

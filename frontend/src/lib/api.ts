@@ -2,6 +2,7 @@ import type {
   AttestationsResponse,
   CatalogResponse,
   ComparisonResponse,
+  ImageExportFormat,
   OverviewResponse,
   SbomResponse,
   VulnerabilitiesResponse
@@ -9,7 +10,7 @@ import type {
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "";
 
-async function request<T>(path: string, params?: Record<string, string | undefined>): Promise<T> {
+export function buildAPIURL(path: string, params?: Record<string, string | undefined>) {
   const url = new URL(path, window.location.origin);
   if (apiBase) {
     url.pathname = `${apiBase.replace(/\/$/, "")}${path}`;
@@ -19,7 +20,11 @@ async function request<T>(path: string, params?: Record<string, string | undefin
       url.searchParams.set(key, value);
     }
   });
+  return url;
+}
 
+async function request<T>(path: string, params?: Record<string, string | undefined>): Promise<T> {
+  const url = buildAPIURL(path, params);
   const response = await fetch(url.toString(), {
     headers: {
       Accept: "application/json"
@@ -62,6 +67,14 @@ export function getSbom(orgId: string, imageId: string) {
 
 export function getAttestations(orgId: string, imageId: string) {
   return request<AttestationsResponse>(`/api/v1/images/${imageId}/attestations`, { org_id: orgId });
+}
+
+export function getImageExportURL(orgId: string, imageId: string, format: ImageExportFormat) {
+  return buildAPIURL(`/api/v1/images/${imageId}/export`, { org_id: orgId, format }).toString();
+}
+
+export function getComparisonExportURL(comparisonId: string) {
+  return buildAPIURL(`/api/v1/comparisons/${comparisonId}/export`).toString();
 }
 
 export function compareImages(params: {

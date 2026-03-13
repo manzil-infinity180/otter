@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -695,6 +696,187 @@ func TestGetImageVulnerabilitiesFiltersSeverity(t *testing.T) {
 	}
 }
 
+func TestExportImageSupportsSBOMAndVulnerabilityFormats(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	if _, err := sbomRepo.Save(context.Background(), sbomindex.Record{
+		OrgID:        "demo-org",
+		ImageID:      "demo-image",
+		ImageName:    "alpine:3.20",
+		SourceFormat: sbomindex.FormatCycloneDX,
+		PackageCount: 1,
+		Packages: []sbomindex.PackageRecord{
+			{Name: "busybox", Version: "1.36.1-r0", Type: "apk"},
+		},
+	}); err != nil {
+		t.Fatalf("sbomRepo.Save() error = %v", err)
+	}
+
+	for _, fixture := range []struct {
+		filename    string
+		contentType string
+		document    string
+	}{
+		{filename: "sbom-cyclonedx.json", contentType: "application/vnd.cyclonedx+json", document: testCycloneDXDocument},
+		{filename: "sbom-spdx.json", contentType: "application/spdx+json", document: testSPDXDocument},
+	} {
+		key, err := ArtifactKeyBuilder{OrgID: "demo-org", ImageID: "demo-image"}.BuildKey(fixture.filename)
+		if err != nil {
+			t.Fatalf("BuildKey() error = %v", err)
+		}
+		if _, err := store.Put(context.Background(), key, []byte(fixture.document), storage.PutOptions{ContentType: fixture.contentType}); err != nil {
+			t.Fatalf("store.Put() error = %v", err)
+		}
+	}
+
+	if _, err := vulnRepo.Save(context.Background(), vulnindex.Record{
+		OrgID:     "demo-org",
+		ImageID:   "demo-image",
+		ImageName: "alpine:3.20",
+		Summary: vulnindex.Summary{
+			Total:      1,
+			BySeverity: map[string]int{"HIGH": 1},
+			ByScanner:  map[string]int{"grype": 1},
+			ByStatus:   map[string]int{vulnindex.StatusAffected: 1},
+			Fixable:    1,
+		},
+		Vulnerabilities: []vulnindex.VulnerabilityRecord{
+			{
+				ID:             "CVE-2024-0001",
+				Severity:       "HIGH",
+				PackageName:    "busybox",
+				PackageVersion: "1.36.1-r0",
+				PackageType:    "apk",
+				Status:         vulnindex.StatusAffected,
+				StatusSource:   vulnindex.StatusSourceScanner,
+				FixVersion:     "1.36.2-r1",
+				Scanners:       []string{"grype"},
+				FirstSeenAt:    time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC),
+				LastSeenAt:     time.Date(2026, 3, 14, 18, 0, 0, 0, time.UTC),
+			},
+		},
+		UpdatedAt: time.Date(2026, 3, 14, 18, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("vulnRepo.Save() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.GET("/api/v1/images/:id/export", handler.ExportImage)
+
+	testCases := []struct {
+		name                string
+		path                string
+		wantContentType     string
+		wantDispositionPart string
+		wantBodyPart        string
+	}{
+		{
+			name:                "cyclonedx",
+			path:                "/api/v1/images/demo-image/export?org_id=demo-org&format=cyclonedx",
+			wantContentType:     "application/vnd.cyclonedx+json",
+			wantDispositionPart: "demo-org-demo-image-sbom-cyclonedx.json",
+			wantBodyPart:        "\"bomFormat\": \"CycloneDX\"",
+		},
+		{
+			name:                "spdx",
+			path:                "/api/v1/images/demo-image/export?org_id=demo-org&format=spdx",
+			wantContentType:     "application/spdx+json",
+			wantDispositionPart: "demo-org-demo-image-sbom-spdx.json",
+			wantBodyPart:        "\"spdxVersion\": \"SPDX-2.3\"",
+		},
+		{
+			name:                "csv",
+			path:                "/api/v1/images/demo-image/export?org_id=demo-org&format=csv",
+			wantContentType:     "text/csv; charset=utf-8",
+			wantDispositionPart: "demo-org-demo-image-vulnerabilities.csv",
+			wantBodyPart:        "CVE-2024-0001",
+		},
+		{
+			name:                "json",
+			path:                "/api/v1/images/demo-image/export?org_id=demo-org&format=json",
+			wantContentType:     "application/json",
+			wantDispositionPart: "demo-org-demo-image-vulnerabilities.json",
+			wantBodyPart:        "\"vulnerabilities\":",
+		},
+		{
+			name:                "sarif",
+			path:                "/api/v1/images/demo-image/export?org_id=demo-org&format=sarif",
+			wantContentType:     "application/sarif+json",
+			wantDispositionPart: "demo-org-demo-image-vulnerabilities.sarif",
+			wantBodyPart:        "\"version\": \"2.1.0\"",
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if got, want := resp.Code, http.StatusOK; got != want {
+				t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+			}
+			if got := resp.Header().Get("Content-Type"); !strings.Contains(got, tc.wantContentType) {
+				t.Fatalf("Content-Type = %q, want substring %q", got, tc.wantContentType)
+			}
+			if got := resp.Header().Get("Content-Disposition"); !strings.Contains(got, tc.wantDispositionPart) {
+				t.Fatalf("Content-Disposition = %q, want substring %q", got, tc.wantDispositionPart)
+			}
+			if got := resp.Body.String(); !strings.Contains(got, tc.wantBodyPart) {
+				t.Fatalf("body = %q, want substring %q", got, tc.wantBodyPart)
+			}
+		})
+	}
+}
+
+func TestExportImageRejectsUnsupportedFormat(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.GET("/api/v1/images/:id/export", handler.ExportImage)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/images/demo-image/export?org_id=demo-org&format=pdf", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+}
+
 func TestGetImageAttestationsReturnsRegistryData(t *testing.T) {
 	t.Parallel()
 
@@ -1008,6 +1190,7 @@ func TestCompareImagesBuildsAndStoresComparison(t *testing.T) {
 	router := gin.New()
 	router.GET("/api/v1/compare", handler.CompareImages)
 	router.GET("/api/v1/comparisons/:id", handler.GetStoredComparison)
+	router.GET("/api/v1/comparisons/:id/export", handler.ExportComparison)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/compare?image1=alpine:3.19&image2=alpine:3.20&org1=demo-org&org2=demo-org", nil)
 	resp := httptest.NewRecorder()
@@ -1046,6 +1229,17 @@ func TestCompareImagesBuildsAndStoresComparison(t *testing.T) {
 
 	if got, want := storedResp.Code, http.StatusOK; got != want {
 		t.Fatalf("stored status = %d, want %d, body=%s", got, want, storedResp.Body.String())
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/api/v1/comparisons/"+payload.ComparisonID+"/export", nil)
+	exportResp := httptest.NewRecorder()
+	router.ServeHTTP(exportResp, exportReq)
+
+	if got, want := exportResp.Code, http.StatusOK; got != want {
+		t.Fatalf("export status = %d, want %d, body=%s", got, want, exportResp.Body.String())
+	}
+	if got := exportResp.Header().Get("Content-Disposition"); !strings.Contains(got, "comparison-"+payload.ComparisonID+".json") {
+		t.Fatalf("Content-Disposition = %q, want comparison export filename", got)
 	}
 }
 

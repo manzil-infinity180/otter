@@ -622,6 +622,10 @@ var browseImageTemplate = template.Must(template.New("browse-image").Parse(`<!do
         <a href="/api/v1/images/{{.Overview.ImageID}}/vulnerabilities?org_id={{.Overview.OrgID}}">vulnerabilities JSON</a>
         <a href="/api/v1/images/{{.Overview.ImageID}}/sbom?org_id={{.Overview.OrgID}}">sbom JSON</a>
         <a href="/api/v1/images/{{.Overview.ImageID}}/attestations?org_id={{.Overview.OrgID}}">attestations JSON</a>
+        <a href="/api/v1/images/{{.Overview.ImageID}}/export?org_id={{.Overview.OrgID}}&format=cyclonedx">export CycloneDX</a>
+        <a href="/api/v1/images/{{.Overview.ImageID}}/export?org_id={{.Overview.OrgID}}&format=spdx">export SPDX</a>
+        <a href="/api/v1/images/{{.Overview.ImageID}}/export?org_id={{.Overview.OrgID}}&format=csv">export CSV</a>
+        <a href="/api/v1/images/{{.Overview.ImageID}}/export?org_id={{.Overview.OrgID}}&format=sarif">export SARIF</a>
       </div>
     </section>
     <section class="panel">

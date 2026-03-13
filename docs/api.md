@@ -139,6 +139,12 @@ If the same image reference exists in multiple orgs, Otter returns `409 Conflict
 
 Returns the persisted comparison report for a previously generated `comparison_id`.
 
+## Export a stored comparison
+
+`GET /api/v1/comparisons/:id/export`
+
+Downloads the persisted comparison report as `comparison-<comparison-id>.json`.
+
 ## Browse the image catalog
 
 `GET /api/v1/catalog?query=alpine&severity=critical&sort=recent`
@@ -174,6 +180,20 @@ Response includes:
 - package and vulnerability summary cards
 - available scan artifacts for download
 - related tags already stored for the same repository within the org
+
+## Export image data
+
+`GET /api/v1/images/:id/export?org_id=default_org&format=cyclonedx|spdx|json|csv|sarif`
+
+Formats:
+
+- `cyclonedx`: raw CycloneDX SBOM JSON
+- `spdx`: raw SPDX SBOM JSON
+- `json`: structured vulnerability report JSON
+- `csv`: flat vulnerability export for spreadsheets
+- `sarif`: SARIF 2.1.0 vulnerability report with stable fingerprints for code-scanning ingestion
+
+Otter returns an attachment download with a deterministic filename based on `org_id`, `image_id`, and the selected format.
 
 ## Get image SBOM
 

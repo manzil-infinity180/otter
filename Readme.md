@@ -151,6 +151,11 @@ Override the catalog list with a comma-separated value:
 OTTER_CATALOG_SCANNER_IMAGES="alpine:latest,nginx:latest,cgr.dev/chainguard/static:latest" go run .
 ```
 
+Export formats are available from the image detail UI and the REST API:
+
+- `GET /api/v1/images/:id/export?org_id=...&format=cyclonedx|spdx|json|csv|sarif`
+- `GET /api/v1/comparisons/:id/export`
+
 
 
 1. Task: Setting up trivy server (dockerfile/docker compose) and scan the image (look also for the case)
