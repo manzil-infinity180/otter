@@ -1,6 +1,13 @@
-version: "3.9"
-
 services:
+  trivy:
+    build:
+      context: .
+      dockerfile: trivy/Dockerfile
+    ports:
+      - "4954:4954"
+    volumes:
+      - trivy-cache:/root/.cache/trivy
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -22,9 +29,13 @@ services:
     environment:
       OTTER_STORAGE: postgres
       OTTER_POSTGRES_DSN: postgres://otter:otter@postgres:5432/otter?sslmode=disable
+      OTTER_TRIVY_ENABLED: "true"
+      OTTER_TRIVY_SERVER_URL: http://trivy:4954
     depends_on:
       postgres:
         condition: service_healthy
+      trivy:
+        condition: service_started
     ports:
       - "7789:7789"
     volumes:
@@ -32,3 +43,4 @@ services:
 
 volumes:
   postgres-data:
+  trivy-cache:

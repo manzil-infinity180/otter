@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,11 +27,12 @@ type ImageGeneratePayload struct {
 }
 
 type ScanHandler struct {
-	store storage.Store
+	store    storage.Store
+	analyzer scan.ImageAnalyzer
 }
 
-func NewScanHandler(store storage.Store) *ScanHandler {
-	return &ScanHandler{store: store}
+func NewScanHandler(store storage.Store, analyzer scan.ImageAnalyzer) *ScanHandler {
+	return &ScanHandler{store: store, analyzer: analyzer}
 }
 
 func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
@@ -53,22 +56,9 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), scanTimeout)
 	defer cancel()
 
-	src, err := scan.GetSource(ctx, scan.ImageReference(payload.ImageName))
+	result, err := h.analyzer.Analyze(ctx, payload.ImageName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load image source: %v", err)})
-		return
-	}
-	defer src.Close()
-
-	sbomDocument, sbomData, err := scan.GenerateSBOMDocument(ctx, src)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("generate sbom: %v", err)})
-		return
-	}
-
-	vulnerabilityDocument, err := scan.GenerateVulnerabilityReport(sbomData)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("generate vulnerabilities: %v", err)})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("analyze image: %v", err)})
 		return
 	}
 
@@ -84,45 +74,89 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		return
 	}
 
-	var (
-		sbomInfo ObjectResponse
-		vulnInfo ObjectResponse
-	)
+	type artifactUpload struct {
+		ResponseName string
+		Key          string
+		Data         []byte
+		ContentType  string
+		Metadata     map[string]string
+	}
 
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.Go(func() error {
-		info, err := h.store.Put(groupCtx, sbomKey, sbomDocument, storage.PutOptions{
-			ContentType: "application/vnd.cyclonedx+json",
+	uploads := []artifactUpload{
+		{
+			ResponseName: "sbom",
+			Key:          sbomKey,
+			Data:         result.SBOMDocument,
+			ContentType:  "application/vnd.cyclonedx+json",
 			Metadata: map[string]string{
 				"artifact":   "sbom",
 				"image_name": payload.ImageName,
 			},
-		})
-		if err != nil {
-			return err
-		}
-		sbomInfo = toObjectResponse(info)
-		return nil
-	})
-	group.Go(func() error {
-		info, err := h.store.Put(groupCtx, vulnerabilityKey, vulnerabilityDocument, storage.PutOptions{
-			ContentType: "application/json",
+		},
+		{
+			ResponseName: "vulnerabilities",
+			Key:          vulnerabilityKey,
+			Data:         result.CombinedVulnerabilities,
+			ContentType:  "application/json",
 			Metadata: map[string]string{
 				"artifact":   "vulnerabilities",
+				"scanner":    "combined",
+				"image_name": payload.ImageName,
+			},
+		},
+	}
+	for _, report := range result.ScannerReports {
+		key, err := keyBuilder.BuildScannerVulnerabilityKey(report.Scanner)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		uploads = append(uploads, artifactUpload{
+			ResponseName: scannerResponseKey(report.Scanner),
+			Key:          key,
+			Data:         report.Document,
+			ContentType:  report.ContentType,
+			Metadata: map[string]string{
+				"artifact":   "vulnerabilities",
+				"scanner":    report.Scanner,
 				"image_name": payload.ImageName,
 			},
 		})
-		if err != nil {
-			return err
-		}
-		vulnInfo = toObjectResponse(info)
-		return nil
-	})
+	}
+
+	storedFiles := make(gin.H, len(uploads))
+	storedKeys := make([]string, 0, len(uploads))
+	var mu sync.Mutex
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	for _, upload := range uploads {
+		upload := upload
+		group.Go(func() error {
+			info, err := h.store.Put(groupCtx, upload.Key, upload.Data, storage.PutOptions{
+				ContentType: upload.ContentType,
+				Metadata:    upload.Metadata,
+			})
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			storedKeys = append(storedKeys, upload.Key)
+			storedFiles[upload.ResponseName] = toObjectResponse(info)
+			mu.Unlock()
+			return nil
+		})
+	}
 	if err := group.Wait(); err != nil {
-		_ = h.store.Delete(context.Background(), sbomKey)
-		_ = h.store.Delete(context.Background(), vulnerabilityKey)
+		for _, key := range storedKeys {
+			_ = h.store.Delete(context.Background(), key)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store scan artifacts: %v", err)})
 		return
+	}
+
+	scanners := make([]string, 0, len(result.ScannerReports))
+	for _, report := range result.ScannerReports {
+		scanners = append(scanners, report.Scanner)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -131,10 +165,9 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		"image_id":        imageID,
 		"image_name":      payload.ImageName,
 		"storage_backend": h.store.Backend(),
-		"files": gin.H{
-			"sbom":            sbomInfo,
-			"vulnerabilities": vulnInfo,
-		},
+		"summary":         result.Summary,
+		"scanners":        scanners,
+		"files":           storedFiles,
 	})
 }
 
@@ -267,4 +300,8 @@ func toObjectResponse(info storage.ObjectInfo) ObjectResponse {
 		Metadata:    info.Metadata,
 		DownloadURL: info.DownloadURL,
 	}
+}
+
+func scannerResponseKey(scanner string) string {
+	return strings.ReplaceAll(scanner, "-", "_") + "_vulnerabilities"
 }

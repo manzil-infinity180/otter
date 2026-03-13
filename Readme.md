@@ -19,6 +19,11 @@ Useful environment variables:
 - `OTTER_DATA_DIR`
 - `OTTER_POSTGRES_DSN`
 - `OTTER_POSTGRES_MIGRATIONS`
+- `OTTER_TRIVY_ENABLED`
+- `OTTER_TRIVY_SERVER_URL`
+- `OTTER_TRIVY_BINARY`
+- `OTTER_TRIVY_TIMEOUT`
+- `OTTER_TRIVY_SCANNERS`
 - `S3_BUCKET_NAME`
 - `AWS_REGION`
 
@@ -36,6 +41,19 @@ Run with PostgreSQL via Docker Compose:
 docker compose up --build
 ```
 
+Run with local storage plus a local Trivy server:
+
+```bash
+trivy server --listen 0.0.0.0:4954
+OTTER_STORAGE=local OTTER_TRIVY_ENABLED=true OTTER_TRIVY_SERVER_URL=http://localhost:4954 go run .
+```
+
+Successful scans now store:
+
+- `sbom.json`
+- `vulnerabilities.json` (combined Grype + Trivy report)
+- `grype-vulnerabilities.json`
+- `trivy-vulnerabilities.json`
 
 
 

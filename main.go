@@ -17,6 +17,7 @@ import (
 	"github.com/otterXf/otter/pkg/api"
 	otteraws "github.com/otterXf/otter/pkg/aws"
 	"github.com/otterXf/otter/pkg/routes"
+	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
 )
 
@@ -34,7 +35,8 @@ func main() {
 		}
 	}()
 
-	scanHandler := api.NewScanHandler(store)
+	analyzer := buildAnalyzer()
+	scanHandler := api.NewScanHandler(store, analyzer)
 	handlers := &routes.Handlers{ScanHandler: scanHandler}
 
 	router := gin.New()
@@ -99,4 +101,15 @@ func buildStore(ctx context.Context) (storage.Store, error) {
 	default:
 		return nil, errors.New("unsupported OTTER_STORAGE backend")
 	}
+}
+
+func buildAnalyzer() scan.ImageAnalyzer {
+	scanConfig := scan.ConfigFromEnv()
+	scanners := []scan.VulnerabilityScanner{
+		scan.NewGrypeVulnerabilityScanner(scan.Options{MaxAllowedBuildAge: 120 * time.Hour}),
+	}
+	if scanConfig.TrivyEnabled {
+		scanners = append(scanners, scan.NewTrivyScanner(scanConfig))
+	}
+	return scan.NewAnalyzer(scan.SyftSBOMGenerator{}, scanners...)
 }
