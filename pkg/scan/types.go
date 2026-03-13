@@ -27,6 +27,8 @@ type VulnerabilityScanner interface {
 type AnalysisResult struct {
 	ImageRef                string
 	SBOMDocument            []byte
+	SBOMSPDXDocument        []byte
+	SBOMData                *sbom.SBOM
 	CombinedVulnerabilities []byte
 	Summary                 VulnerabilitySummary
 	ScannerReports          []ScannerReport

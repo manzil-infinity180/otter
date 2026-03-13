@@ -1,6 +1,10 @@
 package api
 
-import "github.com/otterXf/otter/pkg/storage"
+import (
+	"fmt"
+
+	"github.com/otterXf/otter/pkg/storage"
+)
 
 type ArtifactKeyBuilder struct {
 	OrgID   string
@@ -13,6 +17,17 @@ func (b ArtifactKeyBuilder) BuildKey(filename string) (string, error) {
 
 func (b ArtifactKeyBuilder) BuildSBOMKey() (string, error) {
 	return b.BuildKey("sbom.json")
+}
+
+func (b ArtifactKeyBuilder) BuildSBOMKeyForFormat(format string) (string, error) {
+	switch format {
+	case "cyclonedx":
+		return b.BuildKey("sbom-cyclonedx.json")
+	case "spdx":
+		return b.BuildKey("sbom-spdx.json")
+	default:
+		return "", fmt.Errorf("unsupported sbom format %q", format)
+	}
 }
 
 func (b ArtifactKeyBuilder) BuildVulnerabilityKey() (string, error) {

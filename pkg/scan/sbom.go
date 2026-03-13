@@ -65,6 +65,24 @@ func GenerateSBOMDocument(ctx context.Context, src source.Source) ([]byte, *sbom
 	return data, document, nil
 }
 
+func GenerateSPDXDocument(s *sbom.SBOM) ([]byte, error) {
+	if s == nil {
+		return nil, fmt.Errorf("sbom is required")
+	}
+
+	reader, err := ToSpdxSchema(s)
+	if err != nil {
+		return nil, fmt.Errorf("encode spdx sbom: %w", err)
+	}
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("read encoded spdx sbom: %w", err)
+	}
+
+	return data, nil
+}
+
 func GenerateVulnerabilityReport(s *sbom.SBOM) ([]byte, error) {
 	scanner, err := NewScanner(Options{MaxAllowedBuildAge: 120 * time.Hour})
 	if err != nil {

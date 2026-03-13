@@ -46,7 +46,9 @@ type Store interface {
 
 func defaultContentTypeForKey(key string) string {
 	switch {
-	case strings.HasSuffix(key, "/sbom.json"):
+	case strings.HasSuffix(key, "/sbom-spdx.json"):
+		return "application/spdx+json"
+	case strings.HasSuffix(key, "/sbom-cyclonedx.json"), strings.HasSuffix(key, "/sbom.json"):
 		return "application/vnd.cyclonedx+json"
 	case strings.HasSuffix(key, ".json"):
 		return "application/json"

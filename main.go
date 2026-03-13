@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/otterXf/otter/pkg/api"
 	otteraws "github.com/otterXf/otter/pkg/aws"
 	"github.com/otterXf/otter/pkg/routes"
+	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
 )
@@ -34,9 +36,18 @@ func main() {
 			log.Printf("close storage backend: %v", err)
 		}
 	}()
+	sbomRepository, err := buildSBOMRepository(ctx)
+	if err != nil {
+		log.Fatalf("build sbom index backend: %v", err)
+	}
+	defer func() {
+		if err := sbomRepository.Close(); err != nil {
+			log.Printf("close sbom index backend: %v", err)
+		}
+	}()
 
 	analyzer := buildAnalyzer()
-	scanHandler := api.NewScanHandler(store, analyzer)
+	scanHandler := api.NewScanHandler(store, sbomRepository, analyzer)
 	handlers := &routes.Handlers{ScanHandler: scanHandler}
 
 	router := gin.New()
@@ -98,6 +109,19 @@ func buildStore(ctx context.Context) (storage.Store, error) {
 			return nil, err
 		}
 		return s3Store, nil
+	default:
+		return nil, errors.New("unsupported OTTER_STORAGE backend")
+	}
+}
+
+func buildSBOMRepository(ctx context.Context) (sbomindex.Repository, error) {
+	cfg := storage.ConfigFromEnv()
+
+	switch cfg.Backend {
+	case storage.BackendPostgres:
+		return sbomindex.NewPostgresRepository(ctx, cfg.PostgresDSN)
+	case storage.BackendLocal, storage.BackendS3:
+		return sbomindex.NewLocalRepository(filepath.Join(cfg.LocalDataDir, "_sbom_index"))
 	default:
 		return nil, errors.New("unsupported OTTER_STORAGE backend")
 	}

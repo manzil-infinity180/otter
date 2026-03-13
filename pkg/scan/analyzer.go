@@ -28,6 +28,10 @@ func (a *Analyzer) Analyze(ctx context.Context, imageRef string) (AnalysisResult
 	if err != nil {
 		return AnalysisResult{}, fmt.Errorf("generate sbom: %w", err)
 	}
+	spdxDocument, err := GenerateSPDXDocument(sbomData)
+	if err != nil {
+		return AnalysisResult{}, fmt.Errorf("generate spdx sbom: %w", err)
+	}
 
 	reports := make([]ScannerReport, len(a.scanners))
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -55,6 +59,8 @@ func (a *Analyzer) Analyze(ctx context.Context, imageRef string) (AnalysisResult
 	return AnalysisResult{
 		ImageRef:                imageRef,
 		SBOMDocument:            sbomDocument,
+		SBOMSPDXDocument:        spdxDocument,
+		SBOMData:                sbomData,
 		CombinedVulnerabilities: combinedDocument,
 		Summary:                 combinedReport.Summary,
 		ScannerReports:          reports,
