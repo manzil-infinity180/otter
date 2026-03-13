@@ -28,7 +28,12 @@ func ImageReference(name string) string {
 }
 
 func GetSource(ctx context.Context, input string) (source.Source, error) {
-	src, err := syft.GetSource(ctx, input, nil)
+	cfg := syft.DefaultGetSourceConfig()
+	if registryOptions := RegistryOptionsFromContext(ctx); registryOptions != nil {
+		cfg = cfg.WithRegistryOptions(registryOptions)
+	}
+
+	src, err := syft.GetSource(ctx, input, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("get syft source: %w", err)
 	}

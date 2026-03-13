@@ -17,6 +17,7 @@ import (
 
 	"github.com/otterXf/otter/pkg/api"
 	otteraws "github.com/otterXf/otter/pkg/aws"
+	"github.com/otterXf/otter/pkg/registry"
 	"github.com/otterXf/otter/pkg/routes"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
@@ -57,7 +58,11 @@ func main() {
 	}()
 
 	analyzer := buildAnalyzer()
-	scanHandler := api.NewScanHandler(store, sbomRepository, vulnerabilityRepository, analyzer)
+	registryManager, err := buildRegistryManager()
+	if err != nil {
+		log.Fatalf("build registry manager: %v", err)
+	}
+	scanHandler := api.NewScanHandlerWithRegistry(store, sbomRepository, vulnerabilityRepository, analyzer, registryManager)
 	handlers := &routes.Handlers{ScanHandler: scanHandler}
 
 	router := gin.New()
@@ -170,4 +175,14 @@ func buildAnalyzer() scan.ImageAnalyzer {
 		scanners = append(scanners, scan.NewTrivyScanner(scanConfig))
 	}
 	return scan.NewAnalyzer(scan.SyftSBOMGenerator{}, scanners...)
+}
+
+func buildRegistryManager() (registry.Service, error) {
+	cfg := storage.ConfigFromEnv()
+	registryCfg := registry.ConfigFromEnv(cfg.LocalDataDir)
+	repo, err := registry.NewLocalRepository(registryCfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	return registry.NewManager(repo, registryCfg), nil
 }

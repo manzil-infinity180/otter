@@ -18,6 +18,7 @@ import (
 
 	"github.com/otterXf/otter/pkg/attestation"
 	"github.com/otterXf/otter/pkg/compare"
+	"github.com/otterXf/otter/pkg/registry"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
@@ -44,15 +45,24 @@ type ScanHandler struct {
 	vulnIndex vulnindex.Repository
 	analyzer  scan.ImageAnalyzer
 	attestor  attestation.Fetcher
+	registry  registry.Service
 }
 
 func NewScanHandler(store storage.Store, sbomIndex sbomindex.Repository, vulnIndex vulnindex.Repository, analyzer scan.ImageAnalyzer) *ScanHandler {
+	return NewScanHandlerWithRegistry(store, sbomIndex, vulnIndex, analyzer, registry.NewManager(registry.NewMemoryRepository(), registry.Config{}))
+}
+
+func NewScanHandlerWithRegistry(store storage.Store, sbomIndex sbomindex.Repository, vulnIndex vulnindex.Repository, analyzer scan.ImageAnalyzer, registryService registry.Service) *ScanHandler {
+	if registryService == nil {
+		registryService = registry.NewManager(registry.NewMemoryRepository(), registry.Config{})
+	}
 	return &ScanHandler{
 		store:     store,
 		sbomIndex: sbomIndex,
 		vulnIndex: vulnIndex,
 		analyzer:  analyzer,
 		attestor:  attestation.NewDiscoverer(attestation.ConfigFromEnv()),
+		registry:  registryService,
 	}
 }
 
@@ -67,6 +77,10 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := validateRequestedRegistry(payload.ImageName, payload.Registry); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	orgID, imageID, err := normalizeArtifactIDs(payload.OrgID, payload.ImageID)
 	if err != nil {
@@ -76,6 +90,13 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), scanTimeout)
 	defer cancel()
+
+	imageAccess, err := h.registry.PrepareImage(ctx, payload.ImageName)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("prepare image pull: %v", err)})
+		return
+	}
+	ctx = scan.ContextWithRegistryOptions(ctx, imageAccess.RegistryOptions)
 
 	result, err := h.analyzer.Analyze(ctx, payload.ImageName)
 	if err != nil {
@@ -250,6 +271,8 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		"org_id":          orgID,
 		"image_id":        imageID,
 		"image_name":      payload.ImageName,
+		"registry":        imageAccess.Registry,
+		"registry_auth":   imageAccess.AuthSource,
 		"storage_backend": h.store.Backend(),
 		"summary":         result.Summary,
 		"sbom": gin.H{

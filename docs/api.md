@@ -1,5 +1,46 @@
 # Otter API
 
+## Configure registry access
+
+`POST /api/v1/registries`
+
+Request body examples:
+
+Explicit credentials:
+
+```json
+{
+  "registry": "ghcr.io",
+  "auth_mode": "explicit",
+  "token": "ghp_example",
+  "insecure_skip_tls_verify": false,
+  "insecure_use_http": false
+}
+```
+
+Docker config:
+
+```json
+{
+  "registry": "index.docker.io",
+  "auth_mode": "docker_config",
+  "docker_config_path": "/Users/example/.docker/config.json"
+}
+```
+
+Behavior:
+
+- validates the registry hostname
+- checks registry API reachability before saving configuration
+- supports `docker_config` auth from `config.json` and `explicit` username/password or token auth
+- persists per-registry settings for later scans without returning stored secrets
+
+## List configured registries
+
+`GET /api/v1/registries`
+
+Returns saved registry configuration summaries without secret material.
+
 ## Scan image
 
 `POST /api/v1/scans`
@@ -10,7 +51,7 @@ Request body:
 {
   "arch": "amd64",
   "image_name": "alpine:latest",
-  "registry": "https://index.docker.io/v1",
+  "registry": "index.docker.io",
   "org_id": "default_org",
   "image_id": "alpine-latest"
 }
@@ -20,6 +61,8 @@ Behavior:
 
 - Generates a CycloneDX SBOM and SPDX SBOM.
 - Runs configured vulnerability scanners.
+- Performs a registry preflight check with configured auth before Syft pulls the image.
+- Applies per-registry pull throttling before registry API access.
 - Stores:
   - `sbom.json` as the legacy CycloneDX alias
   - `sbom-cyclonedx.json`

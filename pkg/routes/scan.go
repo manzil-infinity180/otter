@@ -5,6 +5,8 @@ import (
 )
 
 func setupScanRoutes(router *gin.Engine, handlers *Handlers) {
+	router.GET("/api/v1/registries", handlers.ScanHandler.ListRegistries)
+	router.POST("/api/v1/registries", handlers.ScanHandler.ConfigureRegistry)
 	router.POST("/api/v1/scans", handlers.ScanHandler.GenerateScanSbomVul)
 	router.GET("/api/v1/scans/:org_id/:image_id", handlers.ScanHandler.GetImageScans)
 	router.DELETE("/api/v1/scans/:org_id/:image_id", handlers.ScanHandler.DeleteImageScansHandler)

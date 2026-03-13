@@ -17,6 +17,10 @@ Otter now runs locally by default.
 Useful environment variables:
 
 - `OTTER_DATA_DIR`
+- `OTTER_DOCKER_CONFIG_PATH`
+- `OTTER_REGISTRY_HEALTHCHECK_TIMEOUT`
+- `OTTER_REGISTRY_PULL_INTERVAL`
+- `OTTER_REGISTRY_PULLS_PER_SECOND`
 - `OTTER_POSTGRES_DSN`
 - `OTTER_POSTGRES_MIGRATIONS`
 - `OTTER_TRIVY_ENABLED`
@@ -39,6 +43,20 @@ Run with local storage:
 ```bash
 OTTER_STORAGE=local go run .
 ```
+
+Configure a registry for authenticated pulls:
+
+```bash
+curl -X POST http://localhost:7789/api/v1/registries \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "registry": "ghcr.io",
+    "auth_mode": "docker_config",
+    "docker_config_path": "'"$HOME"'/.docker/config.json"
+  }'
+```
+
+Otter uses configured registry settings to preflight image access before each scan and throttles registry API pulls per host. If no explicit registry configuration exists, public images still fall back to the default Docker keychain behavior.
 
 Build and test the React frontend:
 
