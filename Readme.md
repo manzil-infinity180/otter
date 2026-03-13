@@ -55,6 +55,20 @@ Successful scans now store:
 - `grype-vulnerabilities.json`
 - `trivy-vulnerabilities.json`
 
+Otter also indexes vulnerability findings for image-level APIs:
+
+- `GET /api/v1/images/:id/vulnerabilities?org_id=default_org`
+- optional `severity=critical|high|medium|low|negligible`
+- optional `status=affected|not_affected|fixed|under_investigation`
+- OpenVEX import via `POST /api/v1/images/:id/vex?org_id=default_org`
+
+The vulnerability response includes:
+
+- full finding records with CVSS, fix versions, scanner attribution, and advisory status
+- summary counts by severity, scanner, and advisory status
+- fix recommendations grouped by affected package
+- trend snapshots preserved across re-scans
+
 
 
 1. Task: Setting up trivy server (dockerfile/docker compose) and scan the image (look also for the case)

@@ -21,6 +21,7 @@ import (
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
+	"github.com/otterXf/otter/pkg/vulnindex"
 )
 
 func main() {
@@ -45,9 +46,18 @@ func main() {
 			log.Printf("close sbom index backend: %v", err)
 		}
 	}()
+	vulnerabilityRepository, err := buildVulnerabilityRepository(ctx)
+	if err != nil {
+		log.Fatalf("build vulnerability index backend: %v", err)
+	}
+	defer func() {
+		if err := vulnerabilityRepository.Close(); err != nil {
+			log.Printf("close vulnerability index backend: %v", err)
+		}
+	}()
 
 	analyzer := buildAnalyzer()
-	scanHandler := api.NewScanHandler(store, sbomRepository, analyzer)
+	scanHandler := api.NewScanHandler(store, sbomRepository, vulnerabilityRepository, analyzer)
 	handlers := &routes.Handlers{ScanHandler: scanHandler}
 
 	router := gin.New()
@@ -122,6 +132,19 @@ func buildSBOMRepository(ctx context.Context) (sbomindex.Repository, error) {
 		return sbomindex.NewPostgresRepository(ctx, cfg.PostgresDSN)
 	case storage.BackendLocal, storage.BackendS3:
 		return sbomindex.NewLocalRepository(filepath.Join(cfg.LocalDataDir, "_sbom_index"))
+	default:
+		return nil, errors.New("unsupported OTTER_STORAGE backend")
+	}
+}
+
+func buildVulnerabilityRepository(ctx context.Context) (vulnindex.Repository, error) {
+	cfg := storage.ConfigFromEnv()
+
+	switch cfg.Backend {
+	case storage.BackendPostgres:
+		return vulnindex.NewPostgresRepository(ctx, cfg.PostgresDSN)
+	case storage.BackendLocal, storage.BackendS3:
+		return vulnindex.NewLocalRepository(filepath.Join(cfg.LocalDataDir, "_vulnerability_index"))
 	default:
 		return nil, errors.New("unsupported OTTER_STORAGE backend")
 	}

@@ -38,6 +38,10 @@ func (b ArtifactKeyBuilder) BuildScannerVulnerabilityKey(scanner string) (string
 	return b.BuildKey(scanner + "-vulnerabilities.json")
 }
 
+func (b ArtifactKeyBuilder) BuildVEXKey(filename string) (string, error) {
+	return b.BuildKey(filename)
+}
+
 func (b ArtifactKeyBuilder) BuildImagePrefix() (string, error) {
 	return storage.BuildImagePrefix(b.OrgID, b.ImageID)
 }

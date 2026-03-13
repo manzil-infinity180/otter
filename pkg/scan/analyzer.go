@@ -57,6 +57,7 @@ func (a *Analyzer) Analyze(ctx context.Context, imageRef string) (AnalysisResult
 	}
 
 	return AnalysisResult{
+		CombinedReport:          combinedReport,
 		ImageRef:                imageRef,
 		SBOMDocument:            sbomDocument,
 		SBOMSPDXDocument:        spdxDocument,

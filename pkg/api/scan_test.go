@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
+	"github.com/otterXf/otter/pkg/vulnindex"
 )
 
 type stubAnalyzer struct {
@@ -41,13 +43,32 @@ func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
 
-	handler := NewScanHandler(store, repo, stubAnalyzer{
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{
 		result: scan.AnalysisResult{
-			ImageRef:                "alpine:latest",
-			SBOMDocument:            []byte(testCycloneDXDocument),
-			SBOMSPDXDocument:        []byte(testSPDXDocument),
-			SBOMData:                testSyftSBOM(),
+			ImageRef:         "alpine:latest",
+			SBOMDocument:     []byte(testCycloneDXDocument),
+			SBOMSPDXDocument: []byte(testSPDXDocument),
+			SBOMData:         testSyftSBOM(),
+			CombinedReport: scan.CombinedVulnerabilityReport{
+				ImageRef:    "alpine:latest",
+				GeneratedAt: time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC),
+				Summary:     scan.VulnerabilitySummary{Total: 1, Fixable: 1},
+				Vulnerabilities: []scan.VulnerabilityFinding{
+					{
+						ID:             "CVE-2024-0001",
+						Severity:       "HIGH",
+						PackageName:    "busybox",
+						PackageVersion: "1.36.1",
+						FixVersion:     "1.36.2",
+						Scanners:       []string{"grype"},
+					},
+				},
+			},
 			CombinedVulnerabilities: []byte(`{"schema_version":"v1alpha1"}`),
 			Summary:                 scan.VulnerabilitySummary{Total: 2},
 			ScannerReports: []scan.ScannerReport{
@@ -105,6 +126,14 @@ func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.
 	if got, want := record.PackageCount, 2; got != want {
 		t.Fatalf("record.PackageCount = %d, want %d", got, want)
 	}
+
+	vulnerabilities, err := vulnRepo.Get(context.Background(), "demo-org", "demo-image")
+	if err != nil {
+		t.Fatalf("vulnRepo.Get() error = %v", err)
+	}
+	if got, want := vulnerabilities.Summary.Total, 1; got != want {
+		t.Fatalf("vulnerabilities.Summary.Total = %d, want %d", got, want)
+	}
 }
 
 func TestGetImageSBOMReturnsStructuredDocument(t *testing.T) {
@@ -117,6 +146,10 @@ func TestGetImageSBOMReturnsStructuredDocument(t *testing.T) {
 		t.Fatalf("NewLocalStore() error = %v", err)
 	}
 	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
@@ -136,7 +169,7 @@ func TestGetImageSBOMReturnsStructuredDocument(t *testing.T) {
 		t.Fatalf("store.Put() error = %v", err)
 	}
 
-	handler := NewScanHandler(store, repo, stubAnalyzer{})
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
 	router := gin.New()
 	router.GET("/api/v1/images/:id/sbom", handler.GetImageSBOM)
 
@@ -173,8 +206,12 @@ func TestImportImageSBOMStoresDocumentAndIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
 
-	handler := NewScanHandler(store, repo, stubAnalyzer{})
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
 	router := gin.New()
 	router.POST("/api/v1/images/:id/sbom", handler.ImportImageSBOM)
 
@@ -223,6 +260,193 @@ func TestImportImageSBOMStoresDocumentAndIndex(t *testing.T) {
 		if _, err := store.Get(context.Background(), key); err != nil {
 			t.Fatalf("store.Get(%q) error = %v", key, err)
 		}
+	}
+}
+
+func TestGetImageVulnerabilitiesFiltersSeverity(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	record := vulnindex.Record{
+		OrgID:     "demo-org",
+		ImageID:   "demo-image",
+		ImageName: "alpine:latest",
+		Summary: vulnindex.Summary{
+			Total:      2,
+			BySeverity: map[string]int{"CRITICAL": 1, "LOW": 1},
+			ByScanner:  map[string]int{"grype": 2},
+			ByStatus:   map[string]int{vulnindex.StatusAffected: 2},
+			Fixable:    1,
+			Unfixable:  1,
+		},
+		Vulnerabilities: []vulnindex.VulnerabilityRecord{
+			{
+				ID:          "CVE-2024-0001",
+				Severity:    "CRITICAL",
+				PackageName: "openssl",
+				Status:      vulnindex.StatusAffected,
+				Scanners:    []string{"grype"},
+			},
+			{
+				ID:          "CVE-2024-0002",
+				Severity:    "LOW",
+				PackageName: "busybox",
+				Status:      vulnindex.StatusAffected,
+				Scanners:    []string{"grype"},
+			},
+		},
+	}
+	if _, err := vulnRepo.Save(context.Background(), record); err != nil {
+		t.Fatalf("vulnRepo.Save() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.GET("/api/v1/images/:id/vulnerabilities", handler.GetImageVulnerabilities)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/images/demo-image/vulnerabilities?org_id=demo-org&severity=critical", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var payload struct {
+		Summary struct {
+			Total int `json:"total"`
+		} `json:"summary"`
+		SummaryAll struct {
+			Total int `json:"total"`
+		} `json:"summary_all"`
+		Vulnerabilities []struct {
+			ID string `json:"id"`
+		} `json:"vulnerabilities"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Summary.Total != 1 || payload.SummaryAll.Total != 2 || payload.Vulnerabilities[0].ID != "CVE-2024-0001" {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestImportImageVEXUpdatesAdvisoryStatus(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	record := vulnindex.Record{
+		OrgID:     "demo-org",
+		ImageID:   "demo-image",
+		ImageName: "alpine:latest",
+		Summary: vulnindex.Summary{
+			Total:      1,
+			BySeverity: map[string]int{"HIGH": 1},
+			ByScanner:  map[string]int{"grype": 1},
+			ByStatus:   map[string]int{vulnindex.StatusAffected: 1},
+			Fixable:    1,
+		},
+		Vulnerabilities: []vulnindex.VulnerabilityRecord{
+			{
+				ID:           "CVE-2024-0001",
+				Severity:     "HIGH",
+				PackageName:  "openssl",
+				FixVersion:   "3.0.2",
+				Status:       vulnindex.StatusAffected,
+				StatusSource: vulnindex.StatusSourceScanner,
+				Scanners:     []string{"grype"},
+				FirstSeenAt:  time.Now().UTC(),
+				LastSeenAt:   time.Now().UTC(),
+			},
+		},
+	}
+	if _, err := vulnRepo.Save(context.Background(), record); err != nil {
+		t.Fatalf("vulnRepo.Save() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.POST("/api/v1/images/:id/vex", handler.ImportImageVEX)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "demo.vex.json")
+	if err != nil {
+		t.Fatalf("CreateFormFile() error = %v", err)
+	}
+	if _, err := part.Write([]byte(`{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://example.com/vex/demo",
+  "author": "otter",
+  "timestamp": "2026-03-13T18:45:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2024-0001"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "products": [
+        {
+          "@id": "pkg:oci/alpine@latest"
+        }
+      ]
+    }
+  ]
+}`)); err != nil {
+		t.Fatalf("part.Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/images/demo-image/vex?org_id=demo-org", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusCreated; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	updated, err := vulnRepo.Get(context.Background(), "demo-org", "demo-image")
+	if err != nil {
+		t.Fatalf("vulnRepo.Get() error = %v", err)
+	}
+	if got, want := updated.Vulnerabilities[0].Status, vulnindex.StatusNotAffected; got != want {
+		t.Fatalf("status = %s, want %s", got, want)
+	}
+	if len(updated.VEXDocuments) != 1 {
+		t.Fatalf("len(VEXDocuments) = %d, want 1", len(updated.VEXDocuments))
 	}
 }
 

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,11 +19,13 @@ import (
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
+	"github.com/otterXf/otter/pkg/vulnindex"
 )
 
 const (
 	scanTimeout       = 10 * time.Minute
 	maxSBOMUploadSize = 25 << 20
+	maxVEXUploadSize  = 5 << 20
 )
 
 type ImageGeneratePayload struct {
@@ -35,11 +39,12 @@ type ImageGeneratePayload struct {
 type ScanHandler struct {
 	store     storage.Store
 	sbomIndex sbomindex.Repository
+	vulnIndex vulnindex.Repository
 	analyzer  scan.ImageAnalyzer
 }
 
-func NewScanHandler(store storage.Store, sbomIndex sbomindex.Repository, analyzer scan.ImageAnalyzer) *ScanHandler {
-	return &ScanHandler{store: store, sbomIndex: sbomIndex, analyzer: analyzer}
+func NewScanHandler(store storage.Store, sbomIndex sbomindex.Repository, vulnIndex vulnindex.Repository, analyzer scan.ImageAnalyzer) *ScanHandler {
+	return &ScanHandler{store: store, sbomIndex: sbomIndex, vulnIndex: vulnIndex, analyzer: analyzer}
 }
 
 func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
@@ -71,6 +76,16 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 	record, err := sbomindex.BuildRecordFromSyft(orgID, imageID, payload.ImageName, result.SBOMData)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("index sbom: %v", err)})
+		return
+	}
+	existingVulnerabilities, err := h.getExistingVulnerabilityRecord(ctx, orgID, imageID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load vulnerability history: %v", err)})
+		return
+	}
+	vulnerabilityRecord, err := vulnindex.BuildRecordFromReport(orgID, imageID, payload.ImageName, result.CombinedReport, existingVulnerabilities, vulnindex.BuildOptions{TrackTrend: true})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("index vulnerabilities: %v", err)})
 		return
 	}
 
@@ -206,6 +221,15 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store sbom index: %v", err)})
 		return
 	}
+	vulnerabilityRecord, err = h.vulnIndex.Save(ctx, vulnerabilityRecord)
+	if err != nil {
+		for _, key := range storedKeys {
+			_ = h.store.Delete(context.Background(), key)
+		}
+		_ = h.sbomIndex.Delete(context.Background(), orgID, imageID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store vulnerability index: %v", err)})
+		return
+	}
 
 	scanners := make([]string, 0, len(result.ScannerReports))
 	for _, report := range result.ScannerReports {
@@ -225,6 +249,11 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			"license_summary":  record.LicenseSummary,
 			"dependency_roots": record.DependencyRoots,
 			"dependency_tree":  record.DependencyTree,
+		},
+		"vulnerabilities": gin.H{
+			"summary":             vulnerabilityRecord.Summary,
+			"fix_recommendations": vulnerabilityRecord.FixRecommendations,
+			"trend":               vulnerabilityRecord.Trend,
 		},
 		"scanners": scanners,
 		"files":    storedFiles,
@@ -294,6 +323,10 @@ func (h *ScanHandler) DeleteImageScansHandler(c *gin.Context) {
 	}
 	if err := h.sbomIndex.Delete(c.Request.Context(), orgID, imageID); err != nil && !errors.Is(err, sbomindex.ErrNotFound) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("delete sbom index: %v", err)})
+		return
+	}
+	if err := h.vulnIndex.Delete(c.Request.Context(), orgID, imageID); err != nil && !errors.Is(err, vulnindex.ErrNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("delete vulnerability index: %v", err)})
 		return
 	}
 
@@ -509,6 +542,137 @@ func (h *ScanHandler) ImportImageSBOM(c *gin.Context) {
 	})
 }
 
+func (h *ScanHandler) GetImageVulnerabilities(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	record, err := h.getOrCreateVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability report not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load vulnerabilities: %v", err)})
+		return
+	}
+
+	filtered, err := vulnindex.FilterRecord(record, vulnindex.FilterOptions{
+		Severity: c.Query("severity"),
+		Status:   c.Query("status"),
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	response := gin.H{
+		"org_id":              orgID,
+		"image_id":            imageID,
+		"image_name":          filtered.ImageName,
+		"storage_backend":     h.store.Backend(),
+		"summary":             filtered.Summary,
+		"fix_recommendations": filtered.FixRecommendations,
+		"vulnerabilities":     filtered.Vulnerabilities,
+		"trend":               filtered.Trend,
+		"vex_documents":       filtered.VEXDocuments,
+		"updated_at":          filtered.UpdatedAt,
+	}
+	if c.Query("severity") != "" || c.Query("status") != "" {
+		response["summary_all"] = record.Summary
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *ScanHandler) ImportImageVEX(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxVEXUploadSize)
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file upload is required"})
+		return
+	}
+	defer file.Close()
+
+	document, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("read uploaded VEX document: %v", err)})
+		return
+	}
+
+	record, err := h.getExistingVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load vulnerability record: %v", err)})
+		return
+	}
+	if record == nil {
+		record = &vulnindex.Record{
+			OrgID:     orgID,
+			ImageID:   imageID,
+			ImageName: strings.TrimSpace(c.PostForm("image_name")),
+		}
+	}
+
+	importedAt := time.Now().UTC()
+	updatedRecord, vexDocument, err := vulnindex.ApplyVEXDocument(*record, document, header.Filename, importedAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	filename, err := buildVEXFilename(header, importedAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	key, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildVEXKey(filename)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	objectInfo, err := h.store.Put(c.Request.Context(), key, document, storage.PutOptions{
+		ContentType: "application/vnd.openvex+json",
+		Metadata: map[string]string{
+			"artifact":    "vex",
+			"document_id": vexDocument.DocumentID,
+			"source":      "import",
+			"filename":    header.Filename,
+		},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store VEX document: %v", err)})
+		return
+	}
+
+	updatedRecord, err = h.vulnIndex.Save(c.Request.Context(), updatedRecord)
+	if err != nil {
+		_ = h.store.Delete(context.Background(), key)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store vulnerability advisories: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":             "VEX imported successfully",
+		"org_id":              orgID,
+		"image_id":            imageID,
+		"summary":             updatedRecord.Summary,
+		"fix_recommendations": updatedRecord.FixRecommendations,
+		"vex_document":        vexDocument,
+		"vulnerability_count": len(updatedRecord.Vulnerabilities),
+		"file":                toObjectResponse(objectInfo),
+		"updated_at":          updatedRecord.UpdatedAt,
+	})
+}
+
 func (h *ScanHandler) getSBOMArtifact(ctx context.Context, keyBuilder ArtifactKeyBuilder, format string) (storage.Object, error) {
 	key, err := keyBuilder.BuildSBOMKeyForFormat(format)
 	if err != nil {
@@ -544,6 +708,42 @@ func (h *ScanHandler) getOrCreateSBOMRecord(ctx context.Context, orgID, imageID,
 	return h.sbomIndex.Save(ctx, record)
 }
 
+func (h *ScanHandler) getOrCreateVulnerabilityRecord(ctx context.Context, orgID, imageID string) (vulnindex.Record, error) {
+	record, err := h.vulnIndex.Get(ctx, orgID, imageID)
+	if err == nil {
+		return record, nil
+	}
+	if !errors.Is(err, vulnindex.ErrNotFound) {
+		return vulnindex.Record{}, err
+	}
+
+	key, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildVulnerabilityKey()
+	if err != nil {
+		return vulnindex.Record{}, err
+	}
+	object, err := h.store.Get(ctx, key)
+	if err != nil {
+		return vulnindex.Record{}, err
+	}
+
+	record, err = vulnindex.BuildRecordFromDocument(orgID, imageID, "", object.Data, nil, vulnindex.BuildOptions{})
+	if err != nil {
+		return vulnindex.Record{}, err
+	}
+	return h.vulnIndex.Save(ctx, record)
+}
+
+func (h *ScanHandler) getExistingVulnerabilityRecord(ctx context.Context, orgID, imageID string) (*vulnindex.Record, error) {
+	record, err := h.vulnIndex.Get(ctx, orgID, imageID)
+	if err == nil {
+		return &record, nil
+	}
+	if errors.Is(err, vulnindex.ErrNotFound) {
+		return nil, nil
+	}
+	return nil, err
+}
+
 type ObjectResponse struct {
 	Key         string            `json:"key"`
 	Size        int64             `json:"size"`
@@ -568,4 +768,16 @@ func toObjectResponse(info storage.ObjectInfo) ObjectResponse {
 
 func scannerResponseKey(scanner string) string {
 	return strings.ReplaceAll(scanner, "-", "_") + "_vulnerabilities"
+}
+
+func buildVEXFilename(header *multipart.FileHeader, importedAt time.Time) (string, error) {
+	extension := strings.ToLower(filepath.Ext(strings.TrimSpace(header.Filename)))
+	if extension != ".json" {
+		extension = ".json"
+	}
+	filename := fmt.Sprintf("vex-%d%s", importedAt.UTC().UnixNano(), extension)
+	if err := validateDownloadFilename(filename); err != nil {
+		return "", err
+	}
+	return filename, nil
 }

@@ -29,6 +29,7 @@ type AnalysisResult struct {
 	SBOMDocument            []byte
 	SBOMSPDXDocument        []byte
 	SBOMData                *sbom.SBOM
+	CombinedReport          CombinedVulnerabilityReport
 	CombinedVulnerabilities []byte
 	Summary                 VulnerabilitySummary
 	ScannerReports          []ScannerReport
