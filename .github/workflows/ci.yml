@@ -1,127 +1,119 @@
-# Copyright 2025 The OtterXf Contributors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+name: CI
 
-name: release
 on:
-  push:
-    tags:
-      - v*
-    branches:
-      - main
   pull_request:
     branches:
       - main
     paths-ignore:
-      - "**.md"
-    #   - "docs/**"
-    #   - "docs-site/**"
+      - "**/*.md"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+  workflow_dispatch:
 
 permissions:
-  contents: read # This is required for actions/checkout
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  fmt:
+  gofmt:
     uses: ./.github/workflows/otter.yml
     permissions:
-      id-token: write # This is required for requesting the JWT
       contents: read
+      id-token: write
     with:
       pull_request: ${{ github.event_name == 'pull_request' }}
-      step: fmt
+      step: gofmt
       attestations: "git github environment"
-      command: go fmt ./...
+      command: |
+        files=$(git ls-files '*.go')
+        unformatted=$(gofmt -l $files)
+        if [ -n "$unformatted" ]; then
+          printf 'Unformatted Go files:\n%s\n' "$unformatted"
+          exit 1
+        fi
 
-  sast:
-    needs: [fmt]
+  golangci_lint:
+    needs: [gofmt]
     uses: ./.github/workflows/otter.yml
     permissions:
-      id-token: write # This is required for requesting the JWT
       contents: read
+      id-token: write
     with:
       pull_request: ${{ github.event_name == 'pull_request' }}
-      step: sast
+      step: golangci-lint
+      attestations: "git github environment"
+      pre-command: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+      command: golangci-lint run ./...
+
+  govet:
+    needs: [gofmt]
+    uses: ./.github/workflows/otter.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      pull_request: ${{ github.event_name == 'pull_request' }}
+      step: govet
       attestations: "git github environment"
       command: go vet ./...
 
-#   unit-test:
-#     needs: [fmt]
-#     uses: ./.github/workflows/otter.yml
-#     permissions:
-#       id-token: write # This is required for requesting the JWT
-#       contents: read
-#     with:
-#       pull_request: ${{ github.event_name == 'pull_request' }}
-#       step: unit-test
-#       attestations: "git github environment"
-#       command: go test -v -coverprofile=profile.cov -covermode=atomic ./...
-#       artifact-upload-name: profile.cov
-#       artifact-upload-path: profile.cov
-
-
-  release:
+  gotest:
+    needs: [gofmt]
+    uses: ./.github/workflows/otter.yml
     permissions:
+      contents: read
       id-token: write
-      contents: write
-      packages: write
-    runs-on: ubuntu-latest
-    # needs: [sast, unit-test]
-    needs: [sast]
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    with:
+      pull_request: ${{ github.event_name == 'pull_request' }}
+      step: gotest
+      attestations: "git github environment"
+      command: go test ./...
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          fetch-depth: 0
+  gobuild:
+    needs: [golangci_lint, govet, gotest]
+    uses: ./.github/workflows/otter.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      pull_request: ${{ github.event_name == 'pull_request' }}
+      step: gobuild
+      attestations: "git github environment"
+      command: go build ./...
 
-      - name: Set up Go
-        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
-        with:
-           go-version-file: "go.mod"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+  frontend_test:
+    uses: ./.github/workflows/otter.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      pull_request: ${{ github.event_name == 'pull_request' }}
+      setup-go: false
+      setup-node: true
+      node-version: "22"
+      node-cache-dependency-path: frontend/package-lock.json
+      step: frontend-test
+      attestations: "git github environment"
+      command: cd frontend && npm ci && npm test
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
-
-      - name: Install syft
-        uses: anchore/sbom-action/download-syft@8e94d75ddd33f69f691467e42275782e4bfefe84 # v0.20.9
-
-      - name: Download GoReleaser
-        run: go install github.com/goreleaser/goreleaser@v1.23.0
-
-      - name: Run GoReleaser
-        uses: testifysec/witness-run-action@7aa15e327829f1f2a523365c564c948d5dde69dd
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-        with:
-          witness-install-dir: /usr/local/bin
-          version: 0.9.1
-          step: "build"
-          attestations: "github"
-          command: goreleaser release --clean
+  frontend_build:
+    needs: [frontend_test]
+    uses: ./.github/workflows/otter.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      pull_request: ${{ github.event_name == 'pull_request' }}
+      setup-go: false
+      setup-node: true
+      node-version: "22"
+      node-cache-dependency-path: frontend/package-lock.json
+      step: frontend-build
+      attestations: "git github environment"
+      command: cd frontend && npm ci && npm run build
