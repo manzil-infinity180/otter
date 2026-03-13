@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/otterXf/otter/pkg/storage"
 )
@@ -31,7 +33,11 @@ func (r *LocalRepository) Save(_ context.Context, record Record) (Record, error)
 		return Record{}, err
 	}
 
-	record.UpdatedAt = record.UpdatedAt.UTC()
+	if record.UpdatedAt.IsZero() {
+		record.UpdatedAt = time.Now().UTC()
+	} else {
+		record.UpdatedAt = record.UpdatedAt.UTC()
+	}
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return Record{}, fmt.Errorf("marshal sbom index record: %w", err)
@@ -72,6 +78,55 @@ func (r *LocalRepository) Get(_ context.Context, orgID, imageID string) (Record,
 		return Record{}, fmt.Errorf("decode sbom index record: %w", err)
 	}
 	return record, nil
+}
+
+func (r *LocalRepository) List(_ context.Context) ([]Record, error) {
+	root := filepath.Join(r.rootDir, storage.ArtifactRootPrefix)
+	records := make([]Record, 0)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || d.Name() != "sbom-index.json" {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read sbom index record: %w", err)
+		}
+
+		var record Record
+		if err := json.Unmarshal(data, &record); err != nil {
+			return fmt.Errorf("decode sbom index record: %w", err)
+		}
+		records = append(records, record)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list sbom indexes: %w", err)
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].UpdatedAt.Equal(records[j].UpdatedAt) {
+			if records[i].OrgID != records[j].OrgID {
+				return records[i].OrgID < records[j].OrgID
+			}
+			return records[i].ImageID < records[j].ImageID
+		}
+		if records[i].UpdatedAt.IsZero() {
+			return false
+		}
+		if records[j].UpdatedAt.IsZero() {
+			return true
+		}
+		return records[i].UpdatedAt.After(records[j].UpdatedAt)
+	})
+
+	return records, nil
 }
 
 func (r *LocalRepository) FindByImageName(_ context.Context, imageName string) ([]Record, error) {

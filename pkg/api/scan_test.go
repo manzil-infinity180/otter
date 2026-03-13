@@ -273,6 +273,209 @@ func TestImportImageSBOMStoresDocumentAndIndex(t *testing.T) {
 	}
 }
 
+func TestListCatalogReturnsEntriesAndFilters(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	for _, record := range []sbomindex.Record{
+		{
+			OrgID:        "demo-org",
+			ImageID:      "image-a",
+			ImageName:    "alpine:3.19",
+			SourceFormat: sbomindex.FormatCycloneDX,
+			PackageCount: 2,
+			UpdatedAt:    time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC),
+		},
+		{
+			OrgID:        "demo-org",
+			ImageID:      "image-b",
+			ImageName:    "nginx:latest",
+			SourceFormat: sbomindex.FormatCycloneDX,
+			PackageCount: 3,
+			UpdatedAt:    time.Date(2026, 3, 13, 17, 0, 0, 0, time.UTC),
+		},
+	} {
+		if _, err := repo.Save(context.Background(), record); err != nil {
+			t.Fatalf("repo.Save() error = %v", err)
+		}
+	}
+
+	for _, record := range []vulnindex.Record{
+		{
+			OrgID:     "demo-org",
+			ImageID:   "image-a",
+			ImageName: "alpine:3.19",
+			Summary: vulnindex.Summary{
+				Total:      2,
+				BySeverity: map[string]int{"CRITICAL": 1, "HIGH": 1},
+				ByScanner:  map[string]int{"grype": 2},
+			},
+			UpdatedAt: time.Date(2026, 3, 13, 18, 30, 0, 0, time.UTC),
+		},
+		{
+			OrgID:     "demo-org",
+			ImageID:   "image-b",
+			ImageName: "nginx:latest",
+			Summary: vulnindex.Summary{
+				Total:      1,
+				BySeverity: map[string]int{"LOW": 1},
+				ByScanner:  map[string]int{"trivy": 1},
+			},
+			UpdatedAt: time.Date(2026, 3, 13, 17, 30, 0, 0, time.UTC),
+		},
+	} {
+		if _, err := vulnRepo.Save(context.Background(), record); err != nil {
+			t.Fatalf("vulnRepo.Save() error = %v", err)
+		}
+	}
+
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.GET("/api/v1/catalog", handler.ListCatalog)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?severity=critical", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var payload struct {
+		Count int                 `json:"count"`
+		Items []ImageCatalogEntry `json:"items"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got, want := payload.Count, 1; got != want {
+		t.Fatalf("payload.Count = %d, want %d", got, want)
+	}
+	if got, want := payload.Items[0].Repository, "index.docker.io/library/alpine"; got != want {
+		t.Fatalf("payload.Items[0].Repository = %q, want %q", got, want)
+	}
+}
+
+func TestGetImageOverviewReturnsTagsAndFiles(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	for _, record := range []sbomindex.Record{
+		{
+			OrgID:           "demo-org",
+			ImageID:         "image-a",
+			ImageName:       "alpine:3.19",
+			SourceFormat:    sbomindex.FormatCycloneDX,
+			PackageCount:    2,
+			DependencyRoots: []string{"pkg:apk/alpine/busybox@1.0.0"},
+			UpdatedAt:       time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC),
+		},
+		{
+			OrgID:        "demo-org",
+			ImageID:      "image-b",
+			ImageName:    "alpine:3.20",
+			SourceFormat: sbomindex.FormatCycloneDX,
+			PackageCount: 3,
+			UpdatedAt:    time.Date(2026, 3, 13, 19, 0, 0, 0, time.UTC),
+		},
+	} {
+		if _, err := repo.Save(context.Background(), record); err != nil {
+			t.Fatalf("repo.Save() error = %v", err)
+		}
+	}
+
+	if _, err := vulnRepo.Save(context.Background(), vulnindex.Record{
+		OrgID:     "demo-org",
+		ImageID:   "image-a",
+		ImageName: "alpine:3.19",
+		Summary: vulnindex.Summary{
+			Total:      1,
+			BySeverity: map[string]int{"HIGH": 1},
+			ByScanner:  map[string]int{"grype": 1},
+		},
+		UpdatedAt: time.Date(2026, 3, 13, 18, 30, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("vulnRepo.Save() error = %v", err)
+	}
+	if _, err := vulnRepo.Save(context.Background(), vulnindex.Record{
+		OrgID:     "demo-org",
+		ImageID:   "image-b",
+		ImageName: "alpine:3.20",
+		Summary: vulnindex.Summary{
+			Total:      2,
+			BySeverity: map[string]int{"CRITICAL": 1, "HIGH": 1},
+			ByScanner:  map[string]int{"trivy": 2},
+		},
+		UpdatedAt: time.Date(2026, 3, 13, 19, 30, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("vulnRepo.Save() error = %v", err)
+	}
+
+	key, err := ArtifactKeyBuilder{OrgID: "demo-org", ImageID: "image-a"}.BuildSBOMKey()
+	if err != nil {
+		t.Fatalf("BuildSBOMKey() error = %v", err)
+	}
+	if _, err := store.Put(context.Background(), key, []byte(`{"bomFormat":"CycloneDX"}`), storage.PutOptions{
+		ContentType: "application/vnd.cyclonedx+json",
+	}); err != nil {
+		t.Fatalf("store.Put() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.GET("/api/v1/images/:id/overview", handler.GetImageOverview)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/images/image-a/overview?org_id=demo-org", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var payload ImageOverview
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got, want := len(payload.Tags), 1; got != want {
+		t.Fatalf("len(payload.Tags) = %d, want %d", got, want)
+	}
+	if got, want := len(payload.Files), 1; got != want {
+		t.Fatalf("len(payload.Files) = %d, want %d", got, want)
+	}
+	if got, want := payload.Tags[0].Tag, "3.20"; got != want {
+		t.Fatalf("payload.Tags[0].Tag = %q, want %q", got, want)
+	}
+}
+
 func TestGetImageVulnerabilitiesFiltersSeverity(t *testing.T) {
 	t.Parallel()
 

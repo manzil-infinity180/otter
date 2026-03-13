@@ -89,3 +89,42 @@ func TestLocalRepositoryFindByImageName(t *testing.T) {
 		t.Fatalf("len(matches) = %d, want %d", got, want)
 	}
 }
+
+func TestLocalRepositoryList(t *testing.T) {
+	t.Parallel()
+
+	repo, err := NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	for _, record := range []Record{
+		{
+			OrgID:        "demo-org",
+			ImageID:      "image-a",
+			ImageName:    "alpine:3.19",
+			SourceFormat: FormatCycloneDX,
+		},
+		{
+			OrgID:        "demo-org",
+			ImageID:      "image-b",
+			ImageName:    "alpine:3.20",
+			SourceFormat: FormatCycloneDX,
+		},
+	} {
+		if _, err := repo.Save(context.Background(), record); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	records, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := len(records), 2; got != want {
+		t.Fatalf("len(records) = %d, want %d", got, want)
+	}
+	if records[0].UpdatedAt.IsZero() {
+		t.Fatalf("records[0].UpdatedAt = %v", records[0].UpdatedAt)
+	}
+}

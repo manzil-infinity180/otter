@@ -161,3 +161,39 @@ ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
+
+func TestPostgresRepositoryList(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := newPostgresRepositoryWithDB(db)
+	now := time.Now().UTC()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+FROM sbom_indexes
+ORDER BY updated_at DESC, org_id ASC, image_id ASC;
+`)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"org_id", "image_id", "image_name", "source_format", "package_count", "packages", "dependency_tree", "dependency_roots", "license_summary", "updated_at",
+		}).
+			AddRow("demo-org", "image-a", "alpine:3.20", FormatCycloneDX, 2, `[]`, `[]`, `[]`, `[]`, now).
+			AddRow("demo-org", "image-b", "alpine:3.19", FormatCycloneDX, 1, `[]`, `[]`, `[]`, `[]`, now.Add(-time.Hour)))
+
+	records, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := len(records), 2; got != want {
+		t.Fatalf("len(records) = %d, want %d", got, want)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}

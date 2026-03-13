@@ -40,6 +40,17 @@ Run with local storage:
 OTTER_STORAGE=local go run .
 ```
 
+Build and test the React frontend:
+
+```bash
+cd frontend
+npm install
+npm test
+npm run build
+```
+
+When `frontend/dist` exists, Otter serves the React UI at `/` with the image detail route at `/images/:org_id/:image_id`. Without the built bundle, Otter redirects `/` to the basic HTML browse mode at `/browse`.
+
 Run with PostgreSQL via Docker Compose:
 
 ```bash

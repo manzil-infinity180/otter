@@ -61,14 +61,14 @@ func main() {
 	handlers := &routes.Handlers{ScanHandler: scanHandler}
 
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
+	router.Use(gin.Logger(), gin.Recovery(), securityHeaders())
 	if err := router.SetTrustedProxies(nil); err != nil {
 		log.Fatalf("set trusted proxies: %v", err)
 	}
 
-	router.GET("/", func(c *gin.Context) {
+	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"message":         "hello",
+			"message":         "ok",
 			"storage_backend": store.Backend(),
 		})
 	})
@@ -92,6 +92,17 @@ func main() {
 
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("run server: %v", err)
+	}
+}
+
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; img-src 'self' data: https:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+		c.Next()
 	}
 }
 

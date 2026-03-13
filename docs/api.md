@@ -78,6 +78,41 @@ If the same image reference exists in multiple orgs, Otter returns `409 Conflict
 
 Returns the persisted comparison report for a previously generated `comparison_id`.
 
+## Browse the image catalog
+
+`GET /api/v1/catalog?query=alpine&severity=critical&sort=recent`
+
+Optional filters:
+
+- `org_id=demo-org`
+- `query=...` or `q=...`
+- `severity=critical|high|medium|low|negligible|unknown`
+- `sort=recent|critical|packages|name`
+
+Response includes:
+
+- indexed image list with parsed registry, repository, tag, and digest fields
+- package counts, license summary, and vulnerability summary per image
+- scanner attribution and last updated time
+
+Otter also exposes HTML browse fallbacks at:
+
+- `GET /browse`
+- `GET /browse/images/:org_id/:id`
+
+These pages are intended for basic no-JavaScript viewing when the React bundle is not built.
+
+## Get image overview
+
+`GET /api/v1/images/:id/overview?org_id=default_org`
+
+Response includes:
+
+- parsed image metadata for the directory/detail UI
+- package and vulnerability summary cards
+- available scan artifacts for download
+- related tags already stored for the same repository within the org
+
 ## Get image SBOM
 
 `GET /api/v1/images/:id/sbom?org_id=default_org&format=cyclonedx|spdx`
