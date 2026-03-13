@@ -123,3 +123,41 @@ func TestPostgresRepositoryRejectsInvalidKey(t *testing.T) {
 		t.Fatal("expected Save() to reject invalid org ID")
 	}
 }
+
+func TestPostgresRepositoryFindByImageName(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := newPostgresRepositoryWithDB(db)
+	now := time.Now().UTC()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+SELECT org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+FROM sbom_indexes
+WHERE image_name = $1
+ORDER BY updated_at DESC, org_id ASC, image_id ASC;
+`)).
+		WithArgs("alpine:latest").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"org_id", "image_id", "image_name", "source_format", "package_count", "packages", "dependency_tree", "dependency_roots", "license_summary", "updated_at",
+		}).
+			AddRow("demo-org", "image-a", "alpine:latest", FormatCycloneDX, 1, `[]`, `[]`, `[]`, `[]`, now).
+			AddRow("demo-two", "image-b", "alpine:latest", FormatCycloneDX, 2, `[]`, `[]`, `[]`, `[]`, now))
+
+	records, err := repo.FindByImageName(context.Background(), "alpine:latest")
+	if err != nil {
+		t.Fatalf("FindByImageName() error = %v", err)
+	}
+	if got, want := len(records), 2; got != want {
+		t.Fatalf("len(records) = %d, want %d", got, want)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}

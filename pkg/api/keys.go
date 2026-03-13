@@ -46,6 +46,13 @@ func (b ArtifactKeyBuilder) BuildImagePrefix() (string, error) {
 	return storage.BuildImagePrefix(b.OrgID, b.ImageID)
 }
 
+func BuildComparisonKey(comparisonID string) (string, error) {
+	if err := storage.ValidateSegment("comparison_id", comparisonID); err != nil {
+		return "", err
+	}
+	return storage.BuildArtifactKey("comparisons", comparisonID, "comparison.json")
+}
+
 func normalizeArtifactIDs(orgID, imageID string) (string, string, error) {
 	if orgID == "" {
 		orgID = "default_org"

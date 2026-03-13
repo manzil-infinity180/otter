@@ -44,3 +44,48 @@ func TestLocalRepositorySaveGetDelete(t *testing.T) {
 		t.Fatal("expected Get() after Delete() to fail")
 	}
 }
+
+func TestLocalRepositoryFindByImageName(t *testing.T) {
+	t.Parallel()
+
+	repo, err := NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	for _, record := range []Record{
+		{
+			OrgID:        "demo-org",
+			ImageID:      "image-a",
+			ImageName:    "alpine:latest",
+			SourceFormat: FormatCycloneDX,
+			PackageCount: 1,
+		},
+		{
+			OrgID:        "demo-org",
+			ImageID:      "image-b",
+			ImageName:    "nginx:latest",
+			SourceFormat: FormatCycloneDX,
+			PackageCount: 1,
+		},
+		{
+			OrgID:        "demo-two",
+			ImageID:      "image-c",
+			ImageName:    "alpine:latest",
+			SourceFormat: FormatCycloneDX,
+			PackageCount: 2,
+		},
+	} {
+		if _, err := repo.Save(context.Background(), record); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	matches, err := repo.FindByImageName(context.Background(), "alpine:latest")
+	if err != nil {
+		t.Fatalf("FindByImageName() error = %v", err)
+	}
+	if got, want := len(matches), 2; got != want {
+		t.Fatalf("len(matches) = %d, want %d", got, want)
+	}
+}

@@ -50,6 +50,7 @@ type Record struct {
 type Repository interface {
 	Save(ctx context.Context, record Record) (Record, error)
 	Get(ctx context.Context, orgID, imageID string) (Record, error)
+	FindByImageName(ctx context.Context, imageName string) ([]Record, error)
 	Delete(ctx context.Context, orgID, imageID string) error
 	Close() error
 }

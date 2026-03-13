@@ -46,6 +46,38 @@ Downloads a stored artifact by filename.
 
 Deletes stored scan artifacts and the structured SBOM index for the image.
 
+## Compare two scanned images
+
+`GET /api/v1/compare?image1=alpine:3.19&image2=alpine:3.20`
+
+Optional disambiguation:
+
+- `org1=demo-org`
+- `org2=demo-org`
+
+Behavior:
+
+- resolves each image by stored `image_name`
+- compares packages as added, removed, and changed components
+- compares vulnerabilities as new, fixed, and unchanged findings
+- derives layer changes from stored CycloneDX SBOM metadata (`syft:location:*:layerID`)
+- stores the comparison report as `otterxf/comparisons/<comparison-id>/comparison.json`
+
+Response includes:
+
+- deterministic `comparison_id`
+- summary message in the form `Image B has X fewer vulns and Y fewer packages`
+- package, vulnerability, layer, and SBOM diffs
+- stored comparison artifact metadata
+
+If the same image reference exists in multiple orgs, Otter returns `409 Conflict` until `org1` or `org2` is provided.
+
+## Get a stored comparison
+
+`GET /api/v1/comparisons/:id`
+
+Returns the persisted comparison report for a previously generated `comparison_id`.
+
 ## Get image SBOM
 
 `GET /api/v1/images/:id/sbom?org_id=default_org&format=cyclonedx|spdx`

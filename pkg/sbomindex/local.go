@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/otterXf/otter/pkg/storage"
 )
@@ -71,6 +72,46 @@ func (r *LocalRepository) Get(_ context.Context, orgID, imageID string) (Record,
 		return Record{}, fmt.Errorf("decode sbom index record: %w", err)
 	}
 	return record, nil
+}
+
+func (r *LocalRepository) FindByImageName(_ context.Context, imageName string) ([]Record, error) {
+	imageName = strings.TrimSpace(imageName)
+	if imageName == "" {
+		return nil, errors.New("image_name is required")
+	}
+
+	root := filepath.Join(r.rootDir, storage.ArtifactRootPrefix)
+	matches := make([]Record, 0)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || d.Name() != "sbom-index.json" {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read sbom index record: %w", err)
+		}
+
+		var record Record
+		if err := json.Unmarshal(data, &record); err != nil {
+			return fmt.Errorf("decode sbom index record: %w", err)
+		}
+		if strings.TrimSpace(record.ImageName) == imageName {
+			matches = append(matches, record)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find sbom indexes by image name: %w", err)
+	}
+
+	return matches, nil
 }
 
 func (r *LocalRepository) Delete(_ context.Context, orgID, imageID string) error {

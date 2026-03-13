@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/otterXf/otter/pkg/compare"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
@@ -587,6 +588,103 @@ func (h *ScanHandler) GetImageVulnerabilities(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func (h *ScanHandler) CompareImages(c *gin.Context) {
+	image1Ref := strings.TrimSpace(c.Query("image1"))
+	image2Ref := strings.TrimSpace(c.Query("image2"))
+	if image1Ref == "" || image2Ref == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "image1 and image2 are required"})
+		return
+	}
+
+	target1, err := h.resolveComparisonTarget(c.Request.Context(), image1Ref, strings.TrimSpace(c.Query("org1")))
+	if err != nil {
+		h.renderComparisonLookupError(c, "image1", err)
+		return
+	}
+	target2, err := h.resolveComparisonTarget(c.Request.Context(), image2Ref, strings.TrimSpace(c.Query("org2")))
+	if err != nil {
+		h.renderComparisonLookupError(c, "image2", err)
+		return
+	}
+
+	report, err := compare.BuildReport(compare.Inputs{
+		Image1:           target1.SBOM,
+		Image2:           target2.SBOM,
+		Vulnerabilities1: target1.Vulnerabilities,
+		Vulnerabilities2: target2.Vulnerabilities,
+		CycloneDX1:       target1.CycloneDXDocument,
+		CycloneDX2:       target2.CycloneDXDocument,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison: %v", err)})
+		return
+	}
+
+	document, err := compare.MarshalReport(report)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("marshal comparison: %v", err)})
+		return
+	}
+
+	key, err := BuildComparisonKey(report.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison key: %v", err)})
+		return
+	}
+
+	info, err := h.store.Put(c.Request.Context(), key, document, storage.PutOptions{
+		ContentType: "application/json",
+		Metadata: map[string]string{
+			"artifact": "comparison",
+			"image1":   target1.SBOM.ImageName,
+			"image2":   target2.SBOM.ImageName,
+		},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store comparison: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"comparison_id":   report.ID,
+		"storage_backend": h.store.Backend(),
+		"comparison_file": toObjectResponse(info),
+		"comparison":      report,
+	})
+}
+
+func (h *ScanHandler) GetStoredComparison(c *gin.Context) {
+	comparisonID := strings.TrimSpace(c.Param("id"))
+	key, err := BuildComparisonKey(comparisonID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	object, err := h.store.Get(c.Request.Context(), key)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "comparison report not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load comparison report: %v", err)})
+		return
+	}
+
+	var report compare.Report
+	if err := json.Unmarshal(object.Data, &report); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("decode comparison report: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"comparison_id":   comparisonID,
+		"storage_backend": h.store.Backend(),
+		"comparison_file": toObjectResponse(object.Info),
+		"comparison":      report,
+	})
+}
+
 func (h *ScanHandler) ImportImageVEX(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
@@ -742,6 +840,86 @@ func (h *ScanHandler) getExistingVulnerabilityRecord(ctx context.Context, orgID,
 		return nil, nil
 	}
 	return nil, err
+}
+
+type comparisonTarget struct {
+	SBOM              sbomindex.Record
+	Vulnerabilities   vulnindex.Record
+	CycloneDXDocument []byte
+}
+
+var errComparisonTargetAmbiguous = errors.New("comparison target is ambiguous")
+var errComparisonTargetNotFound = errors.New("comparison target not found")
+
+func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, orgID string) (comparisonTarget, error) {
+	if err := validateImageReference(imageName); err != nil {
+		return comparisonTarget{}, err
+	}
+	if orgID != "" {
+		if err := storage.ValidateSegment("org_id", orgID); err != nil {
+			return comparisonTarget{}, err
+		}
+	}
+
+	records, err := h.sbomIndex.FindByImageName(ctx, imageName)
+	if err != nil {
+		return comparisonTarget{}, err
+	}
+
+	filtered := make([]sbomindex.Record, 0, len(records))
+	for _, record := range records {
+		if orgID == "" || record.OrgID == orgID {
+			filtered = append(filtered, record)
+		}
+	}
+	if len(filtered) == 0 {
+		return comparisonTarget{}, errComparisonTargetNotFound
+	}
+	if len(filtered) > 1 {
+		return comparisonTarget{}, fmt.Errorf("%w: image %q found in multiple orgs", errComparisonTargetAmbiguous, imageName)
+	}
+
+	record := filtered[0]
+	keyBuilder := ArtifactKeyBuilder{OrgID: record.OrgID, ImageID: record.ImageID}
+	object, err := h.getSBOMArtifact(ctx, keyBuilder, sbomindex.FormatCycloneDX)
+	if err != nil {
+		return comparisonTarget{}, err
+	}
+
+	vulnerabilities, err := h.getOrCreateVulnerabilityRecord(ctx, record.OrgID, record.ImageID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
+			vulnerabilities = vulnindex.Record{
+				OrgID:     record.OrgID,
+				ImageID:   record.ImageID,
+				ImageName: record.ImageName,
+				Summary: vulnindex.Summary{
+					BySeverity: map[string]int{},
+					ByScanner:  map[string]int{},
+					ByStatus:   map[string]int{},
+				},
+			}
+		} else {
+			return comparisonTarget{}, err
+		}
+	}
+
+	return comparisonTarget{
+		SBOM:              record,
+		Vulnerabilities:   vulnerabilities,
+		CycloneDXDocument: object.Data,
+	}, nil
+}
+
+func (h *ScanHandler) renderComparisonLookupError(c *gin.Context, field string, err error) {
+	switch {
+	case errors.Is(err, errComparisonTargetNotFound), errors.Is(err, storage.ErrNotFound), errors.Is(err, sbomindex.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("%s not found in stored scans", field)})
+	case errors.Is(err, errComparisonTargetAmbiguous):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	}
 }
 
 type ObjectResponse struct {

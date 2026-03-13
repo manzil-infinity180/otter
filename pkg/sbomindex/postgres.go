@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -156,6 +157,76 @@ WHERE org_id = $1 AND image_id = $2;
 	}
 
 	return record, nil
+}
+
+func (r *PostgresRepository) FindByImageName(ctx context.Context, imageName string) ([]Record, error) {
+	imageName = strings.TrimSpace(imageName)
+	if imageName == "" {
+		return nil, errors.New("image_name is required")
+	}
+
+	const query = `
+SELECT org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+FROM sbom_indexes
+WHERE image_name = $1
+ORDER BY updated_at DESC, org_id ASC, image_id ASC;
+`
+
+	rows, err := r.db.QueryContext(ctx, query, imageName)
+	if err != nil {
+		return nil, fmt.Errorf("find sbom indexes by image name: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]Record, 0)
+	for rows.Next() {
+		var (
+			record              Record
+			packagesJSON        []byte
+			dependencyTreeJSON  []byte
+			dependencyRootsJSON []byte
+			licenseSummaryJSON  []byte
+			updatedAt           time.Time
+		)
+
+		if err := rows.Scan(
+			&record.OrgID,
+			&record.ImageID,
+			&record.ImageName,
+			&record.SourceFormat,
+			&record.PackageCount,
+			&packagesJSON,
+			&dependencyTreeJSON,
+			&dependencyRootsJSON,
+			&licenseSummaryJSON,
+			&updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan sbom index: %w", err)
+		}
+
+		record.UpdatedAt = updatedAt.UTC()
+		if err := json.Unmarshal(packagesJSON, &record.Packages); err != nil {
+			return nil, fmt.Errorf("decode sbom packages: %w", err)
+		}
+		if err := json.Unmarshal(dependencyTreeJSON, &record.DependencyTree); err != nil {
+			return nil, fmt.Errorf("decode sbom dependency tree: %w", err)
+		}
+		if len(dependencyRootsJSON) > 0 {
+			if err := json.Unmarshal(dependencyRootsJSON, &record.DependencyRoots); err != nil {
+				return nil, fmt.Errorf("decode sbom dependency roots: %w", err)
+			}
+		}
+		if err := json.Unmarshal(licenseSummaryJSON, &record.LicenseSummary); err != nil {
+			return nil, fmt.Errorf("decode sbom license summary: %w", err)
+		}
+
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sbom indexes: %w", err)
+	}
+
+	return records, nil
 }
 
 func (r *PostgresRepository) Delete(ctx context.Context, orgID, imageID string) error {
