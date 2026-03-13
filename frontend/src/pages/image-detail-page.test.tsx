@@ -97,15 +97,40 @@ describe("ImageDetailPage", () => {
                 severity: "CRITICAL",
                 package_name: "busybox",
                 package_version: "1.36.1",
+                fix_version: "1.36.2",
                 scanners: ["grype"],
                 status: "affected",
                 status_source: "scanner",
                 first_seen_at: "2026-03-13T18:30:00Z",
                 last_seen_at: "2026-03-13T18:30:00Z"
+              },
+              {
+                id: "CVE-2024-0002",
+                severity: "HIGH",
+                package_name: "musl",
+                package_version: "1.2.5",
+                scanners: ["grype", "trivy"],
+                status: "fixed",
+                status_source: "openvex",
+                advisory: {
+                  document_id: "openvex-1",
+                  filename: "advisory.json",
+                  author: "Otter QA",
+                  status_notes: "Patched by downstream backport."
+                },
+                first_seen_at: "2026-03-13T18:00:00Z",
+                last_seen_at: "2026-03-13T18:30:00Z"
               }
             ],
             fix_recommendations: [],
-            vex_documents: [],
+            vex_documents: [
+              {
+                document_id: "openvex-1",
+                author: "Otter QA",
+                version: 1,
+                filename: "advisory.json"
+              }
+            ],
             updated_at: "2026-03-13T18:30:00Z"
           })
         };
@@ -342,5 +367,38 @@ describe("ImageDetailPage", () => {
       "href",
       expect.stringContaining("/api/v1/comparisons/comparison-123/export")
     );
+  });
+
+  it("renders the tags and SBOM tabs", async () => {
+    const user = userEvent.setup();
+    renderImagePage();
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "library/alpine" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("tab", { name: "Tags" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Repository tags" })).toBeInTheDocument());
+    expect(screen.getByText("alpine:3.19")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "SBOM" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "SBOM package inventory" })).toBeInTheDocument());
+    expect(screen.getByText("GPL-2.0-only · 1")).toBeInTheDocument();
+    expect(screen.getAllByText("busybox").length).toBeGreaterThan(0);
+  });
+
+  it("renders the attestation and advisory tabs", async () => {
+    const user = userEvent.setup();
+    renderImagePage();
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "library/alpine" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("tab", { name: "Attestations" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Attestation coverage" })).toBeInTheDocument());
+    expect(screen.getByText("builder@example.com")).toBeInTheDocument();
+    expect(screen.getByText("valid")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Advisories" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Advisories and VEX status" })).toBeInTheDocument());
+    expect(screen.getByText("Patched by downstream backport.")).toBeInTheDocument();
+    expect(screen.getByText("advisory.json")).toBeInTheDocument();
   });
 });
