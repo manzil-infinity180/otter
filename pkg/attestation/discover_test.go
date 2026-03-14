@@ -209,6 +209,18 @@ func TestDiscoverMarksArtifactsUnverifiedWithoutCosign(t *testing.T) {
 	}
 }
 
+func TestExecCommandRunnerRejectsDisallowedCommand(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := (ExecCommandRunner{}).Run(context.Background(), "sh", "-c", "echo test")
+	if err == nil {
+		t.Fatal("expected disallowed command error")
+	}
+	if got, want := err.Error(), "disallowed command: sh"; got != want {
+		t.Fatalf("Run() error = %q, want %q", got, want)
+	}
+}
+
 func mustHash(t *testing.T, value string) v1.Hash {
 	t.Helper()
 

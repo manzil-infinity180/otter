@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -24,9 +25,18 @@ type CommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, []byte, error)
 }
 
+var allowedCommandNames = map[string]struct{}{
+	"cosign": {},
+}
+
 type ExecCommandRunner struct{}
 
 func (ExecCommandRunner) Run(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+	commandName := filepath.Base(strings.TrimSpace(name))
+	if _, ok := allowedCommandNames[commandName]; !ok {
+		return nil, nil, fmt.Errorf("disallowed command: %s", name)
+	}
+
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 

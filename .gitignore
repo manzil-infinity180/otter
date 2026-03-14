@@ -1,6 +1,7 @@
 
 *.pem
-*.env
+.env
+.env.*
 bin
-*.json
-*.idea
+.idea
+data/
