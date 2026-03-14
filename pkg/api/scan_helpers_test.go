@@ -73,14 +73,14 @@ func TestExecuteCatalogScanAndHelperFallbacks(t *testing.T) {
 
 	handler := NewScanHandlerWithRegistry(store, sbomRepo, vulnRepo, stubAnalyzer{
 		result: scan.AnalysisResult{
-			ImageRef:                 "alpine:latest",
-			SBOMDocument:             []byte(testCycloneDXDocument),
-			SBOMSPDXDocument:         []byte(testSPDXDocument),
-			SBOMData:                 testSyftSBOM(),
-			CombinedVulnerabilities:  []byte(`{"matches":[]}`),
-			CombinedReport:           testCombinedVulnerabilityReport(),
-			Summary:                  scan.VulnerabilitySummary{Total: 1, Fixable: 1},
-			ScannerReports:           []scan.ScannerReport{{Scanner: "grype", ContentType: "application/json", Document: []byte(`[]`)}},
+			ImageRef:                "alpine:latest",
+			SBOMDocument:            []byte(testCycloneDXDocument),
+			SBOMSPDXDocument:        []byte(testSPDXDocument),
+			SBOMData:                testSyftSBOM(),
+			CombinedVulnerabilities: []byte(`{"matches":[]}`),
+			CombinedReport:          testCombinedVulnerabilityReport(),
+			Summary:                 scan.VulnerabilitySummary{Total: 1, Fixable: 1},
+			ScannerReports:          []scan.ScannerReport{{Scanner: "grype", ContentType: "application/json", Document: []byte(`[]`)}},
 		},
 	}, stubRegistryService{
 		access: registry.ImageAccess{Registry: "index.docker.io", AuthSource: "anonymous"},

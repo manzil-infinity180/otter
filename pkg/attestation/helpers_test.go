@@ -138,7 +138,7 @@ func TestDiscovererVerificationAndClassificationHelpers(t *testing.T) {
 	}
 
 	unverified := (&Discoverer{
-		cfg: Config{CosignBinary: "cosign"},
+		cfg:    Config{CosignBinary: "cosign"},
 		runner: stubRunner{err: exec.ErrNotFound},
 	}).verify(context.Background(), false, "ghcr.io/demo/app@sha256:1234")
 	if got, want := unverified.Status, VerificationStatusUnverified; got != want {

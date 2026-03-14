@@ -75,13 +75,13 @@ jobs:
 
       - name: Set up Node.js
         if: ${{ inputs.setup-node && inputs.node-cache-dependency-path == '' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ inputs.node-version }}
 
       - name: Set up Node.js with npm cache
         if: ${{ inputs.setup-node && inputs.node-cache-dependency-path != '' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ inputs.node-version }}
           cache: npm
@@ -97,30 +97,38 @@ jobs:
       - name: Run pre-command with witness
         if: ${{ inputs.pre-command != '' && !inputs.pull_request && inputs.attestations != '' }}
         uses: testifysec/witness-run-action@7aa15e327829f1f2a523365c564c948d5dde69dd
+        env:
+          PRE_COMMAND: ${{ inputs.pre-command }}
         with:
           witness-install-dir: /usr/local/bin
           version: 0.9.1
           step: pre-${{ inputs.step }}
           attestations: ${{ inputs.attestations }}
-          command: /bin/sh -lc "${{ inputs.pre-command }}"
+          command: /bin/sh -lc "$PRE_COMMAND"
 
       - name: Run pre-command
         if: ${{ inputs.pre-command != '' && (inputs.pull_request || inputs.attestations == '') }}
-        run: ${{ inputs.pre-command }}
+        env:
+          PRE_COMMAND: ${{ inputs.pre-command }}
+        run: /bin/sh -lc "$PRE_COMMAND"
 
       - name: Run command with witness
         if: ${{ !inputs.pull_request && inputs.attestations != '' }}
         uses: testifysec/witness-run-action@7aa15e327829f1f2a523365c564c948d5dde69dd
+        env:
+          COMMAND: ${{ inputs.command }}
         with:
           witness-install-dir: /usr/local/bin
           version: 0.9.1
           step: ${{ inputs.step }}
           attestations: ${{ inputs.attestations }}
-          command: /bin/sh -lc "${{ inputs.command }}"
+          command: /bin/sh -lc "$COMMAND"
 
       - name: Run command
         if: ${{ inputs.pull_request || inputs.attestations == '' }}
-        run: ${{ inputs.command }}
+        env:
+          COMMAND: ${{ inputs.command }}
+        run: /bin/sh -lc "$COMMAND"
 
       - name: Upload workflow artifact
         if: ${{ inputs.artifact-upload-path != '' && inputs.artifact-upload-name != '' }}

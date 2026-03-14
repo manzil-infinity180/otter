@@ -21,6 +21,7 @@ FROM alpine:3.22
 
 WORKDIR /app
 RUN apk add --no-cache ca-certificates
+RUN addgroup -S otter && adduser -S -G otter otter && mkdir -p /app/data && chown -R otter:otter /app
 
 COPY --from=builder /app/otter /usr/local/bin/otter
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
@@ -28,5 +29,7 @@ COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
 
 EXPOSE 7789
+
+USER otter
 
 CMD ["otter"]

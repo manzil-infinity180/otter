@@ -26,8 +26,8 @@ func TestSchedulerStartAndEnqueueConfiguredScans(t *testing.T) {
 	}, log.Default())
 
 	scheduler := NewScheduler(queue, Config{
-		Enabled:  true,
-		Interval: time.Hour,
+		Enabled:   true,
+		Interval:  time.Hour,
 		ImageRefs: []string{"alpine:latest"},
 	}, nil)
 	scheduler.enqueueConfiguredScans()

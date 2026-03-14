@@ -37,12 +37,12 @@ func TestVulnerabilityHelperFunctions(t *testing.T) {
 		{
 			DocumentID:  "old",
 			LastUpdated: importedAt,
-			Statements: []VEXStatementRecord{{VulnerabilityID: "CVE-2024-0001", Status: StatusAffected}},
+			Statements:  []VEXStatementRecord{{VulnerabilityID: "CVE-2024-0001", Status: StatusAffected}},
 		},
 		{
 			DocumentID:  "new",
 			LastUpdated: importedAt.Add(time.Minute),
-			Statements: []VEXStatementRecord{{VulnerabilityID: "CVE-2024-0001", Status: StatusFixed}},
+			Statements:  []VEXStatementRecord{{VulnerabilityID: "CVE-2024-0001", Status: StatusFixed}},
 		},
 	})
 	if got, want := overlay["CVE-2024-0001"].Statement.Status, StatusFixed; got != want {

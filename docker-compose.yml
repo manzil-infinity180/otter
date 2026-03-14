@@ -11,15 +11,15 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: otter
-      POSTGRES_USER: otter
-      POSTGRES_PASSWORD: otter
+      POSTGRES_DB: ${POSTGRES_DB:-otter}
+      POSTGRES_USER: ${POSTGRES_USER:-otter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otter}
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U otter -d otter"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -28,7 +28,7 @@ services:
     build: .
     environment:
       OTTER_STORAGE: postgres
-      OTTER_POSTGRES_DSN: postgres://otter:otter@postgres:5432/otter?sslmode=disable
+      OTTER_POSTGRES_DSN: postgres://${POSTGRES_USER:-otter}:${POSTGRES_PASSWORD:-otter}@postgres:5432/${POSTGRES_DB:-otter}?sslmode=disable
       OTTER_TRIVY_ENABLED: "true"
       OTTER_TRIVY_SERVER_URL: http://trivy:4954
     depends_on:
