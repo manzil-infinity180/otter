@@ -32,7 +32,12 @@ var allowedCommandNames = map[string]struct{}{
 type ExecCommandRunner struct{}
 
 func (ExecCommandRunner) Run(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
-	commandName := filepath.Base(strings.TrimSpace(name))
+	trimmedName := strings.TrimSpace(name)
+	if strings.ContainsRune(trimmedName, filepath.Separator) || strings.ContainsRune(trimmedName, '\\') {
+		return nil, nil, fmt.Errorf("disallowed command path: %s", name)
+	}
+
+	commandName := filepath.Base(trimmedName)
 	if _, ok := allowedCommandNames[commandName]; !ok {
 		return nil, nil, fmt.Errorf("disallowed command: %s", name)
 	}
@@ -40,7 +45,7 @@ func (ExecCommandRunner) Run(ctx context.Context, name string, args ...string) (
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, commandName, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -330,6 +335,7 @@ func extractVerificationMetadata(entries []json.RawMessage) (string, string, *ti
 	var signer string
 	var issuer string
 	var ts *time.Time
+	bestSignerPriority := 0
 
 	for _, entry := range entries {
 		var decoded any
@@ -337,9 +343,10 @@ func extractVerificationMetadata(entries []json.RawMessage) (string, string, *ti
 			continue
 		}
 		walkJSON(decoded, func(path []string, value any) {
-			if signer == "" && isSignerPath(path) {
-				if text := stringValue(value); text != "" && !strings.Contains(strings.ToLower(text), "docker-reference") {
+			if priority := signerPathPriority(path); priority > 0 {
+				if text := stringValue(value); text != "" && !strings.Contains(strings.ToLower(text), "docker-reference") && priority > bestSignerPriority {
 					signer = text
+					bestSignerPriority = priority
 				}
 			}
 			if issuer == "" && isIssuerPath(path) {
@@ -363,7 +370,13 @@ func walkJSON(value any, visit func(path []string, value any)) {
 		visit(path, value)
 		switch typed := value.(type) {
 		case map[string]any:
-			for key, item := range typed {
+			keys := make([]string, 0, len(typed))
+			for key := range typed {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				item := typed[key]
 				walk(append(path, key), item)
 			}
 		case []any:
@@ -376,11 +389,24 @@ func walkJSON(value any, visit func(path []string, value any)) {
 }
 
 func isSignerPath(path []string) bool {
+	return signerPathPriority(path) > 0
+}
+
+func signerPathPriority(path []string) int {
 	if len(path) == 0 {
-		return false
+		return 0
 	}
 	key := strings.ToLower(path[len(path)-1])
-	return key == "subject" || key == "email" || key == "uri"
+	switch key {
+	case "email":
+		return 3
+	case "subject":
+		return 2
+	case "uri":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func isIssuerPath(path []string) bool {

@@ -17,7 +17,7 @@ func TestPostgresStorePutGetListDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck // test cleanup
 
 	store := newPostgresStoreWithDB(db)
 	key := "otterxf/demo-org/demo-image/sbom.json"

@@ -18,7 +18,7 @@ func TestPostgresRepositorySaveGetDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck // test cleanup
 
 	repo := newPostgresRepositoryWithDB(db)
 	record := Record{
@@ -132,7 +132,7 @@ func TestPostgresRepositoryFindByImageName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck // test cleanup
 
 	repo := newPostgresRepositoryWithDB(db)
 	now := time.Now().UTC()
@@ -170,7 +170,7 @@ func TestPostgresRepositoryList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck // test cleanup
 
 	repo := newPostgresRepositoryWithDB(db)
 	now := time.Now().UTC()
@@ -206,7 +206,7 @@ func TestPostgresRepositoryErrorPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck // test cleanup
 
 	repo := newPostgresRepositoryWithDB(db)
 	mock.ExpectQuery(regexp.QuoteMeta(`

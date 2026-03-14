@@ -221,6 +221,18 @@ func TestExecCommandRunnerRejectsDisallowedCommand(t *testing.T) {
 	}
 }
 
+func TestExecCommandRunnerRejectsCommandPath(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := (ExecCommandRunner{}).Run(context.Background(), "/tmp/cosign", "version")
+	if err == nil {
+		t.Fatal("expected disallowed command path error")
+	}
+	if got, want := err.Error(), "disallowed command path: /tmp/cosign"; got != want {
+		t.Fatalf("Run() error = %q, want %q", got, want)
+	}
+}
+
 func mustHash(t *testing.T, value string) v1.Hash {
 	t.Helper()
 

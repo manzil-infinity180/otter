@@ -57,7 +57,7 @@ func TestBuildLocalDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildStore() error = %v", err)
 	}
-	defer store.Close()
+	defer store.Close() //nolint:errcheck // test cleanup
 
 	if got, want := store.Backend(), storage.BackendLocal; got != want {
 		t.Fatalf("store.Backend() = %q, want %q", got, want)
@@ -75,7 +75,7 @@ func TestBuildLocalDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSBOMRepository() error = %v", err)
 	}
-	defer sbomRepo.Close()
+	defer sbomRepo.Close() //nolint:errcheck // test cleanup
 
 	savedSBOM, err := sbomRepo.Save(ctx, sbomindex.Record{
 		OrgID:        "demo-org",
@@ -95,7 +95,7 @@ func TestBuildLocalDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildVulnerabilityRepository() error = %v", err)
 	}
-	defer vulnRepo.Close()
+	defer vulnRepo.Close() //nolint:errcheck // test cleanup
 
 	savedVulns, err := vulnRepo.Save(ctx, vulnindex.Record{
 		OrgID:     "demo-org",
@@ -167,13 +167,13 @@ func TestBuildRepositoriesUseLocalIndexesForS3Mode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSBOMRepository() error = %v", err)
 	}
-	defer sbomRepo.Close()
+	defer sbomRepo.Close() //nolint:errcheck // test cleanup
 
 	vulnRepo, err := buildVulnerabilityRepository(context.Background())
 	if err != nil {
 		t.Fatalf("buildVulnerabilityRepository() error = %v", err)
 	}
-	defer vulnRepo.Close()
+	defer vulnRepo.Close() //nolint:errcheck // test cleanup
 }
 
 func TestBuildPostgresDependenciesReturnConnectionErrors(t *testing.T) {

@@ -170,7 +170,7 @@ ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 	if err != nil {
 		return nil, fmt.Errorf("list sbom indexes: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck // rows cleanup after iteration
 
 	records := make([]Record, 0)
 	for rows.Next() {
@@ -240,7 +240,7 @@ ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 	if err != nil {
 		return nil, fmt.Errorf("find sbom indexes by image name: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck // rows cleanup after iteration
 
 	records := make([]Record, 0)
 	for rows.Next() {

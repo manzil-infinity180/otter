@@ -75,7 +75,7 @@ func (SyftSBOMGenerator) Generate(ctx context.Context, imageRef string) ([]byte,
 	if err != nil {
 		return nil, nil, fmt.Errorf("load image source: %w", err)
 	}
-	defer src.Close()
+	defer src.Close() //nolint:errcheck // source cleanup after scan
 
 	document, sbomData, err := GenerateSBOMDocument(ctx, src)
 	if err != nil {

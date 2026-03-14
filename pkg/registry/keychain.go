@@ -76,7 +76,7 @@ func loadDockerConfig(path string) (*configfile.ConfigFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open docker config: %w", err)
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck // file cleanup after parse
 
 	cfg, err := config.LoadFromReader(file)
 	if err != nil {

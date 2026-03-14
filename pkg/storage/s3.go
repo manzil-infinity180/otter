@@ -60,7 +60,7 @@ func (s *S3Store) Put(ctx context.Context, key string, data []byte, opts PutOpti
 	if err != nil {
 		return ObjectInfo{}, fmt.Errorf("create temp dir for s3 upload: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck // best-effort temp dir cleanup
 
 	filePath := filepath.Join(tmpDir, filepath.Base(key))
 	if err := os.WriteFile(filePath, data, 0o600); err != nil {
@@ -99,7 +99,7 @@ func (s *S3Store) Get(ctx context.Context, key string) (Object, error) {
 	if err != nil {
 		return Object{}, fmt.Errorf("create temp dir for s3 download: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir) //nolint:errcheck // best-effort temp dir cleanup
 
 	filePath := filepath.Join(tmpDir, filepath.Base(key))
 	if err := s.client.DownloadFile(ctx, s.bucketName, key, filePath); err != nil {

@@ -706,7 +706,7 @@ func (h *ScanHandler) ImportImageSBOM(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file upload is required"})
 		return
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck // request file cleanup
 
 	document, err := io.ReadAll(file)
 	if err != nil {
@@ -999,7 +999,7 @@ func (h *ScanHandler) ImportImageVEX(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file upload is required"})
 		return
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck // request file cleanup
 
 	document, err := io.ReadAll(file)
 	if err != nil {

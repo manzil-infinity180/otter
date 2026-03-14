@@ -21,8 +21,6 @@ import (
 	"github.com/anchore/syft/syft/source"
 )
 
-const defaultImage = "manzilrahul/k8s-custom-controller:latest"
-
 func ImageReference(name string) string {
 	return name
 }

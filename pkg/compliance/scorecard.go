@@ -54,7 +54,7 @@ func (c *HTTPScorecardClient) Lookup(ctx context.Context, repository Repository)
 	if err != nil {
 		return ScorecardSummary{}, fmt.Errorf("request scorecard: %w", err)
 	}
-	defer response.Body.Close()
+	defer response.Body.Close() //nolint:errcheck // response body cleanup
 
 	if response.StatusCode != http.StatusOK {
 		return ScorecardSummary{}, fmt.Errorf("scorecard returned %s", response.Status)

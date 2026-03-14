@@ -25,8 +25,8 @@ func TestContextRegistryOptionsRoundTrip(t *testing.T) {
 	if got := RegistryOptionsFromContext(ctx); got != options {
 		t.Fatalf("RegistryOptionsFromContext() = %#v, want %#v", got, options)
 	}
-	if got := RegistryOptionsFromContext(nil); got != nil {
-		t.Fatalf("RegistryOptionsFromContext(nil) = %#v, want nil", got)
+	if got := RegistryOptionsFromContext(context.Background()); got != nil {
+		t.Fatalf("RegistryOptionsFromContext(background) = %#v, want nil", got)
 	}
 }
 

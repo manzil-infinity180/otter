@@ -179,7 +179,7 @@ func (m *Manager) healthcheckRegistry(ctx context.Context, record Record) (strin
 	if err != nil {
 		return "", "", fmt.Errorf("query registry api: %w", err)
 	}
-	defer response.Body.Close()
+	defer response.Body.Close() //nolint:errcheck // response body cleanup
 
 	switch {
 	case response.StatusCode >= 200 && response.StatusCode < 400:

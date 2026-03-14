@@ -157,7 +157,7 @@ ORDER BY key;
 	if err != nil {
 		return nil, fmt.Errorf("list artifacts for prefix %s: %w", prefix, err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck // rows cleanup after iteration
 
 	var objects []ObjectInfo
 	for rows.Next() {
