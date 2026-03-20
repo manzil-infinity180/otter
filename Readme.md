@@ -51,6 +51,10 @@ Useful environment variables:
 - `OTTER_CATALOG_SCANNER_WORKERS`
 - `OTTER_CATALOG_SCANNER_QUEUE_SIZE`
 - `OTTER_CATALOG_SCANNER_JOB_HISTORY_LIMIT`
+- `OTTER_CATALOG_SCANNER_STATE_DIR`
+- `OTTER_CATALOG_SCANNER_RETRY_LIMIT`
+- `OTTER_CATALOG_SCANNER_RETRY_BACKOFF`
+- `OTTER_CATALOG_SCANNER_RETRY_BACKOFF_MAX`
 - `OTTER_CATALOG_SCANNER_ORG_ID`
 - `OTTER_CATALOG_SCANNER_IMAGES`
 - `S3_BUCKET_NAME`
@@ -163,6 +167,8 @@ Otter now includes a local-first catalog scan pipeline backed by an in-process w
 
 - The worker accepts async scan requests via `POST /api/v1/scans` with `"async": true`.
 - Job status is available at `GET /api/v1/scan-jobs/:id`.
+- Async jobs are persisted under `OTTER_CATALOG_SCANNER_STATE_DIR` and recover queued or in-flight work after process restarts.
+- Failed jobs retry with capped exponential backoff before settling in a terminal `failed` state, and the job status response now includes queue-depth counters plus retry metadata.
 - A scheduler enqueues a default image set on boot and then repeats on `OTTER_CATALOG_SCANNER_INTERVAL`.
 - Re-scans reuse stable `org_id` and `image_id` values, so vulnerability trend snapshots continue to build over time.
 

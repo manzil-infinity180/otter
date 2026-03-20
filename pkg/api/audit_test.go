@@ -36,6 +36,10 @@ func (q *capturingJobQueue) Get(jobID string) (catalogscan.Job, bool) {
 	return q.job, true
 }
 
+func (q *capturingJobQueue) Stats() catalogscan.QueueStats {
+	return catalogscan.QueueStats{}
+}
+
 func TestGenerateScanAsyncEmitsAuditEventAndPropagatesActor(t *testing.T) {
 	t.Parallel()
 

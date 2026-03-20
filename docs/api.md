@@ -87,9 +87,11 @@ Async mode:
 Returns the current job state for an async scan request, including:
 
 - pending, running, succeeded, or failed status
+- attempt count, max attempts, last error, and the next retry timestamp when a retry is scheduled
 - original scan request payload with the normalized `platform` when provided
 - completion timestamps
 - vulnerability summary, scanner list, and resolved platform when the job succeeds
+- queue counters for pending, running, succeeded, failed, current queue depth, and active targets
 
 ## List scan artifacts
 

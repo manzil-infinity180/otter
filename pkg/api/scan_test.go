@@ -57,6 +57,7 @@ func (s stubComplianceScorecardClient) Lookup(context.Context, compliance.Reposi
 type stubJobQueue struct {
 	job      catalogscan.Job
 	requests []catalogscan.Request
+	stats    catalogscan.QueueStats
 }
 
 func (s *stubJobQueue) Enqueue(req catalogscan.Request) (catalogscan.Job, error) {
@@ -69,6 +70,10 @@ func (s *stubJobQueue) Get(jobID string) (catalogscan.Job, bool) {
 		return catalogscan.Job{}, false
 	}
 	return s.job, true
+}
+
+func (s *stubJobQueue) Stats() catalogscan.QueueStats {
+	return s.stats
 }
 
 func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.T) {
@@ -293,6 +298,7 @@ func TestGetScanJobReturnsQueuedJob(t *testing.T) {
 			Request:   catalogscan.Request{OrgID: "catalog", ImageID: "nginx-job", ImageName: "nginx:latest"},
 			CreatedAt: time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC),
 		},
+		stats: catalogscan.QueueStats{Pending: 2, Running: 1, QueueDepth: 2, ActiveTargets: 3},
 	})
 
 	router := gin.New()
@@ -311,12 +317,24 @@ func TestGetScanJobReturnsQueuedJob(t *testing.T) {
 			ID     string `json:"id"`
 			Status string `json:"status"`
 		} `json:"job"`
+		Queue struct {
+			Pending       int `json:"pending"`
+			Running       int `json:"running"`
+			QueueDepth    int `json:"queue_depth"`
+			ActiveTargets int `json:"active_targets"`
+		} `json:"queue"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	if payload.Job.ID != "scanjob-queued" || payload.Job.Status != catalogscan.StatusRunning {
 		t.Fatalf("payload.Job = %#v", payload.Job)
+	}
+	if got, want := payload.Queue.QueueDepth, 2; got != want {
+		t.Fatalf("payload.Queue.QueueDepth = %d, want %d", got, want)
+	}
+	if got, want := payload.Queue.ActiveTargets, 3; got != want {
+		t.Fatalf("payload.Queue.ActiveTargets = %d, want %d", got, want)
 	}
 }
 

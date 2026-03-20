@@ -77,7 +77,10 @@ func main() {
 	catalogScanConfig := catalogscan.ConfigFromEnv()
 	scanHandler := api.NewScanHandlerWithRegistry(store, sbomRepository, vulnerabilityRepository, analyzer, registryManager)
 	scanHandler.SetAuditRecorder(auditRecorder)
-	jobQueue := catalogscan.NewQueue(scanHandler, catalogScanConfig, log.Default())
+	jobQueue, err := catalogscan.NewQueue(scanHandler, catalogScanConfig, log.Default())
+	if err != nil {
+		log.Fatalf("build catalog scan queue: %v", err)
+	}
 	jobQueue.Start(ctx)
 	catalogscan.NewScheduler(jobQueue, catalogScanConfig, log.Default()).Start(ctx)
 	scanHandler.SetJobQueue(jobQueue)

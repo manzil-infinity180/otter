@@ -67,6 +67,7 @@ type ScanHandler struct {
 type scanJobQueue interface {
 	Enqueue(catalogscan.Request) (catalogscan.Job, error)
 	Get(string) (catalogscan.Job, bool)
+	Stats() catalogscan.QueueStats
 }
 
 type ScanSBOMSummary struct {
@@ -265,6 +266,7 @@ func (h *ScanHandler) GetScanJob(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"job":             job,
+		"queue":           h.jobs.Stats(),
 		"storage_backend": h.store.Backend(),
 	})
 }

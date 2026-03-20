@@ -24,10 +24,33 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-07` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-08` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-08: persistent scan-job storage, retries, and restart recovery
+
+What changed:
+
+- replaced the in-memory-only catalog scan queue with a durable local job store under `OTTER_CATALOG_SCANNER_STATE_DIR`, writing one JSON record per async scan job so queued state survives process restarts across all storage backends
+- refactored `pkg/catalogscan.Queue` to restore persisted pending and interrupted running jobs on startup, rebuild active-target deduplication state, and resume dispatch without requiring clients to re-enqueue work
+- added capped retry behavior with queue-configurable `OTTER_CATALOG_SCANNER_RETRY_LIMIT`, `OTTER_CATALOG_SCANNER_RETRY_BACKOFF`, and `OTTER_CATALOG_SCANNER_RETRY_BACKOFF_MAX` settings; retry metadata now persists on the job record
+- exposed queue observability through `Queue.Stats()` and surfaced queue-depth counters alongside `GET /api/v1/scan-jobs/:id`, while keeping the existing job-status route and status values backward compatible
+- added regression coverage for persisted pending/running job recovery, retry success and retry exhaustion paths, env-driven queue durability settings, and queue metadata in the scan-job API response
+
+What was verified:
+
+- `go test ./pkg/catalogscan ./pkg/api`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- queue durability is intentionally local-file backed for this remediation pass, which keeps restart recovery simple without introducing a new shared database contract; multi-node queue coordination and broader retention controls remain later work
+- operators upgrading existing deployments should ensure `OTTER_DATA_DIR` or `OTTER_CATALOG_SCANNER_STATE_DIR` points to persistent disk if they expect async jobs to survive container restarts
+- `GET /api/v1/scan-jobs/:id` now includes additive retry and queue metadata fields, so strict response decoders should tolerate the extended payload
 
 ### OTTER-AUDIT-07: remove write side effects from read-only GET endpoints
 

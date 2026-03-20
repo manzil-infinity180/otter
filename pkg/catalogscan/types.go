@@ -27,6 +27,15 @@ const (
 	StatusFailed    = "failed"
 )
 
+type QueueStats struct {
+	Pending       int `json:"pending"`
+	Running       int `json:"running"`
+	Succeeded     int `json:"succeeded"`
+	Failed        int `json:"failed"`
+	QueueDepth    int `json:"queue_depth"`
+	ActiveTargets int `json:"active_targets"`
+}
+
 type Request struct {
 	OrgID     string `json:"org_id"`
 	ImageID   string `json:"image_id"`
@@ -51,14 +60,17 @@ type Result struct {
 }
 
 type Job struct {
-	ID          string     `json:"id"`
-	Status      string     `json:"status"`
-	Request     Request    `json:"request"`
-	CreatedAt   time.Time  `json:"created_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	Result      *Result    `json:"result,omitempty"`
+	ID            string     `json:"id"`
+	Status        string     `json:"status"`
+	Request       Request    `json:"request"`
+	CreatedAt     time.Time  `json:"created_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	Attempts      int        `json:"attempts"`
+	MaxAttempts   int        `json:"max_attempts,omitempty"`
+	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	Result        *Result    `json:"result,omitempty"`
 }
 
 type Executor interface {

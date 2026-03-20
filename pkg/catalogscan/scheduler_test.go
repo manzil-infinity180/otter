@@ -2,7 +2,6 @@ package catalogscan
 
 import (
 	"context"
-	"log"
 	"testing"
 	"time"
 )
@@ -16,14 +15,15 @@ func (noopExecutor) ExecuteCatalogScan(context.Context, Request) (Result, error)
 func TestSchedulerStartAndEnqueueConfiguredScans(t *testing.T) {
 	t.Parallel()
 
-	queue := NewQueue(noopExecutor{}, Config{
+	queue := mustQueue(t, noopExecutor{}, Config{
 		Enabled:         true,
 		WorkerCount:     1,
 		QueueSize:       5,
 		JobHistoryLimit: 5,
 		Interval:        time.Hour,
 		ImageRefs:       []string{"alpine:latest"},
-	}, log.Default())
+		StateDir:        t.TempDir(),
+	})
 
 	scheduler := NewScheduler(queue, Config{
 		Enabled:   true,
