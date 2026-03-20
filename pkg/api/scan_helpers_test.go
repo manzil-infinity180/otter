@@ -319,6 +319,23 @@ func TestRenderComparisonLookupErrorAndFilenameHelpers(t *testing.T) {
 	}
 }
 
+func TestRenderScanExecutionErrorTreatsPolicyBlocksAsBadRequest(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	NewScanHandler(nil, nil, nil, nil).renderScanExecutionError(c, &registry.PolicyError{
+		Registry: "127.0.0.1:5000",
+		Reason:   "host IP 127.0.0.1 is a loopback address",
+	})
+
+	if got, want := recorder.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, recorder.Body.String())
+	}
+}
+
 func testCombinedVulnerabilityReport() scan.CombinedVulnerabilityReport {
 	return scan.CombinedVulnerabilityReport{
 		ImageRef:    "alpine:latest",

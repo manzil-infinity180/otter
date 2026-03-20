@@ -417,7 +417,10 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 }
 
 func (h *ScanHandler) renderScanExecutionError(c *gin.Context, err error) {
+	var policyErr *registry.PolicyError
 	switch {
+	case errors.As(err, &policyErr):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, context.DeadlineExceeded):
 		c.JSON(http.StatusGatewayTimeout, gin.H{"error": err.Error()})
 	case strings.Contains(err.Error(), "prepare image pull:"):

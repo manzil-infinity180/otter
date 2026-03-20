@@ -24,6 +24,10 @@ Useful environment variables:
 - `OTTER_REGISTRY_HEALTHCHECK_TIMEOUT`
 - `OTTER_REGISTRY_PULL_INTERVAL`
 - `OTTER_REGISTRY_PULLS_PER_SECOND`
+- `OTTER_REGISTRY_ALLOWLIST`
+- `OTTER_REGISTRY_DENYLIST`
+- `OTTER_REGISTRY_ALLOW_PRIVATE_NETWORKS`
+- `OTTER_REGISTRY_ALLOW_INSECURE`
 - `OTTER_REGISTRY_SECRET_KEY`
 - `OTTER_REGISTRY_SECRET_KEY_FILE`
 - `OTTER_POSTGRES_DSN`
@@ -70,6 +74,12 @@ curl -X POST http://localhost:7789/api/v1/registries \
 ```
 
 Otter uses configured registry settings to preflight image access before each scan and throttles registry API pulls per host. If no explicit registry configuration exists, public images still fall back to the default Docker keychain behavior.
+
+Registry egress is policy-controlled by default:
+
+- loopback, RFC1918/private, link-local, and cluster-internal registry targets are blocked unless `OTTER_REGISTRY_ALLOW_PRIVATE_NETWORKS=true`
+- `insecure_use_http` and `insecure_skip_tls_verify` require `OTTER_REGISTRY_ALLOW_INSECURE=true`
+- `OTTER_REGISTRY_ALLOWLIST` and `OTTER_REGISTRY_DENYLIST` accept comma-separated hostname patterns such as `ghcr.io,*.docker.io`
 
 When explicit registry credentials are configured, Otter stores registry metadata in `./data/_registry/registries.json` and writes the credential blob separately with local encryption. For managed deployments, provide `OTTER_REGISTRY_SECRET_KEY` or `OTTER_REGISTRY_SECRET_KEY_FILE` so the encryption key is controlled outside the data directory.
 

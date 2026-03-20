@@ -224,6 +224,10 @@ func TestConfigFromEnv(t *testing.T) {
 	t.Setenv("OTTER_DOCKER_CONFIG_PATH", "/tmp/config.json")
 	t.Setenv("OTTER_REGISTRY_HEALTHCHECK_TIMEOUT", "5s")
 	t.Setenv("OTTER_REGISTRY_PULLS_PER_SECOND", "4")
+	t.Setenv("OTTER_REGISTRY_ALLOWLIST", "ghcr.io,*.docker.io")
+	t.Setenv("OTTER_REGISTRY_DENYLIST", "registry.internal")
+	t.Setenv("OTTER_REGISTRY_ALLOW_PRIVATE_NETWORKS", "true")
+	t.Setenv("OTTER_REGISTRY_ALLOW_INSECURE", "true")
 
 	cfg := ConfigFromEnv("/tmp/otter")
 
@@ -238,5 +242,17 @@ func TestConfigFromEnv(t *testing.T) {
 	}
 	if got, want := cfg.MinPullInterval.String(), "250ms"; got != want {
 		t.Fatalf("MinPullInterval = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(cfg.AllowedRegistries, ","), "ghcr.io,*.docker.io"; got != want {
+		t.Fatalf("AllowedRegistries = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(cfg.DeniedRegistries, ","), "registry.internal"; got != want {
+		t.Fatalf("DeniedRegistries = %q, want %q", got, want)
+	}
+	if !cfg.AllowPrivateNetworks {
+		t.Fatal("expected AllowPrivateNetworks to be true")
+	}
+	if !cfg.AllowInsecureRegistries {
+		t.Fatal("expected AllowInsecureRegistries to be true")
 	}
 }

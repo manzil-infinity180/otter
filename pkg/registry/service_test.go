@@ -19,7 +19,10 @@ func TestManagerConfigureAndPrepareImageWithExplicitCredentials(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	host := strings.TrimPrefix(strings.TrimPrefix(server.URL, "https://"), "http://")
-	manager := NewManager(NewMemoryRepository(), Config{})
+	manager := NewManager(NewMemoryRepository(), Config{
+		AllowPrivateNetworks:    true,
+		AllowInsecureRegistries: true,
+	})
 
 	result, err := manager.Configure(context.Background(), ConfigureRequest{
 		Registry:        host,
@@ -61,7 +64,10 @@ func TestManagerConfigureDockerConfigRegistry(t *testing.T) {
 
 	host := strings.TrimPrefix(strings.TrimPrefix(server.URL, "https://"), "http://")
 	configPath := writeDockerConfig(t, host, "reader", "tokenpass")
-	manager := NewManager(NewMemoryRepository(), Config{})
+	manager := NewManager(NewMemoryRepository(), Config{
+		AllowPrivateNetworks:    true,
+		AllowInsecureRegistries: true,
+	})
 
 	result, err := manager.Configure(context.Background(), ConfigureRequest{
 		Registry:         host,

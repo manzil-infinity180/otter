@@ -24,10 +24,34 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` and `OTTER-AUDIT-02` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-03` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-03: registry egress allowlists and safer defaults
+
+What changed:
+
+- added registry egress policy enforcement in `pkg/registry` so both registry configuration and image scan preflight now validate the target host before any outbound request is made
+- added env-driven `OTTER_REGISTRY_ALLOWLIST` and `OTTER_REGISTRY_DENYLIST` support with exact-host and `*.` suffix matching
+- blocked loopback, RFC1918/private, link-local, carrier-grade NAT, benchmark, and common cluster-internal registry targets by default, including DNS names that resolve to private addresses
+- required explicit operator opt-in through `OTTER_REGISTRY_ALLOW_PRIVATE_NETWORKS=true` for internal targets and `OTTER_REGISTRY_ALLOW_INSECURE=true` for `insecure_use_http` or `insecure_skip_tls_verify`
+- logged allow and deny policy decisions with registry, host, action, and reason so operator overrides are visible in server logs
+- updated scan error rendering so registry policy denials return `400` instead of a generic upstream/preflight failure
+- added regression tests covering blocked loopback/private targets, insecure override rejection, allowlist and denylist matching, explicit operator opt-ins, DNS-to-private blocking, and the API error mapping
+
+What was verified:
+
+- `go test ./pkg/registry/... ./pkg/api/...`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- existing localhost or in-cluster registry deployments now need explicit environment opt-ins before registry configuration or scans will succeed
+- allowlist/denylist matching is hostname-based and intentionally simple; if operators need more complex network policy, keep using upstream network controls in addition to these app-level checks
 
 ### OTTER-AUDIT-02: stop storing registry credentials in plaintext on disk
 

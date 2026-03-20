@@ -37,6 +37,9 @@ func (m *Manager) Configure(ctx context.Context, req ConfigureRequest) (Configur
 	if err != nil {
 		return ConfigureResult{}, err
 	}
+	if err := m.enforcePolicy(ctx, "configure", record); err != nil {
+		return ConfigureResult{}, err
+	}
 
 	registryAPI, authSource, err := m.healthcheckRegistry(ctx, record)
 	if err != nil {
@@ -83,6 +86,9 @@ func (m *Manager) PrepareImage(ctx context.Context, imageRef string) (ImageAcces
 
 	record, err := m.recordForRegistry(ctx, ref.Context().RegistryStr())
 	if err != nil {
+		return ImageAccess{}, err
+	}
+	if err := m.enforcePolicy(ctx, "prepare-image", record); err != nil {
 		return ImageAccess{}, err
 	}
 
