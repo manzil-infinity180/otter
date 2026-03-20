@@ -1,0 +1,47 @@
+services:
+  trivy:
+    build:
+      context: .
+      dockerfile: trivy/Dockerfile
+    ports:
+      - "4954:4954"
+    volumes:
+      - trivy-cache:/root/.cache/trivy
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-otter}
+      POSTGRES_USER: ${POSTGRES_USER:-otter}
+      # Set this in your shell or a local .env file before starting Compose.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your shell or .env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  otter:
+    build: .
+    environment:
+      OTTER_STORAGE: postgres
+      OTTER_POSTGRES_DSN: postgres://${POSTGRES_USER:-otter}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your shell or .env}@postgres:5432/${POSTGRES_DB:-otter}?sslmode=disable
+      OTTER_TRIVY_ENABLED: "true"
+      OTTER_TRIVY_SERVER_URL: http://trivy:4954
+    depends_on:
+      postgres:
+        condition: service_healthy
+      trivy:
+        condition: service_started
+    ports:
+      - "7789:7789"
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  postgres-data:
+  trivy-cache:

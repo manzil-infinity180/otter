@@ -1,0 +1,39 @@
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/700.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    color: #121b2a;
+    background:
+      radial-gradient(circle at top left, rgba(14, 165, 233, 0.18), transparent 30%),
+      radial-gradient(circle at top right, rgba(245, 158, 11, 0.16), transparent 26%),
+      linear-gradient(180deg, #f7f8fb 0%, #edf1f7 100%);
+  }
+
+  html.dark {
+    color: #edf1f7;
+    background:
+      radial-gradient(circle at top left, rgba(14, 165, 233, 0.16), transparent 30%),
+      radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.12), transparent 26%),
+      linear-gradient(180deg, #0b1220 0%, #121b2a 100%);
+  }
+
+  body {
+    @apply min-h-screen bg-transparent text-ink-900 antialiased dark:text-ink-50;
+  }
+
+  #root {
+    @apply min-h-screen;
+  }
+
+  a {
+    @apply transition-colors;
+  }
+}

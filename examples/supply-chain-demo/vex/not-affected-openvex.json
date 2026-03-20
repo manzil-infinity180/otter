@@ -1,0 +1,22 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://example.com/openvex/supply-chain-demo/cve-2024-0001",
+  "author": "Otter tutorial",
+  "timestamp": "2026-03-20T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2024-0001"
+      },
+      "products": [
+        {
+          "@id": "pkg:docker/ghcr.io/example/supply-chain-demo@latest"
+        }
+      ],
+      "status": "not_affected",
+      "status_notes": "Tutorial overlay showing how Otter applies advisory state to a stored scan.",
+      "justification": "vulnerable_code_not_in_execute_path"
+    }
+  ]
+}

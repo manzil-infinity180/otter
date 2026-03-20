@@ -25,4 +25,5 @@ type Handlers struct {
 func SetupRoutes(router *gin.Engine, handlers *Handlers) {
 	setupScanRoutes(router, handlers)
 	setupAWSRoutes(router, handlers)
+	setupFrontendRoutes(router, handlers)
 }

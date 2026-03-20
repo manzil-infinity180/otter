@@ -1,107 +1,52 @@
-# Original version copied from
-# https://github.com/slsa-framework/slsa-github-generator/blob/main/internal/builders/container/README.md#getting-started
+name: Release
 
 on:
   push:
-    branches:
-      - main
     tags:
-      - 'v*.*.*'
+      - v*.*.*
+  workflow_dispatch:
 
-env:
-  IMAGE_REGISTRY: ghcr.io
-  IMAGE_NAME: otterxf/otter
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # This step builds our image, pushes it, and outputs the repo hash digest.
-  build:
-    permissions:
-      contents: read
-      id-token: write
-      packages: write
-    outputs:
-      image: ${{ steps.image.outputs.image }}
-      digest: ${{ steps.image.outputs.digest }}
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the repository
-        uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # v2.3.4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@dc7b9719a96d48369863986a06765841d7ea23f6 # v2.0.0
-
-      - name: Authenticate Docker
-        uses: docker/login-action@49ed152c8eca782a232dede0303416e8f356c37b # v2.0.0
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          registry: ${{ env.IMAGE_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@69f6fc9d46f2f8bf0d5491e4aabe0bb8c6a4678a # v4.0.1
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         with:
-          images: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
-          flavor: |
-            latest=false
-          tags: |
-            # branch event
-            type=ref,event=branch
-            # tag event
-            type=ref,event=tag
-            # pull request event
-            type=ref,event=pr
+          go-version-file: go.mod
+          cache: true
 
-      - name: Build and push Docker image
-        uses: testifysec/witness-run-action@7aa15e327829f1f2a523365c564c948d5dde69dd
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          version: 0.10.1
-          step: build-image
-          attestations: "git github environment docker slsa"
-          command: |
-            /bin/sh -c "docker buildx build --platform linux/arm64 \
-              --tag '${{steps.meta.outputs.tags}}' \
-              --metadata-file metadata.json \
-              --provenance=false --push ."
-      - name: Output image
-        id: image
-        run: |
-          # NOTE: Set the image as an output because the `env` context is not
-          # available to the inputs of a reusable workflow call.
-          image_name="${IMAGE_REGISTRY}/${IMAGE_NAME}"
-          echo "image=$image_name" >> "$GITHUB_OUTPUT"
-          cat metadata.json
-          digest=$(jq -r '."containerimage.digest"' metadata.json)
-          echo "digest: $digest"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-  # This step calls the container workflow to generate provenance and push it to
-  # the container registry.
-  provenance:
-    needs: [build]
-    permissions:
-      actions: read # for detecting the Github Actions environment.
-      id-token: write # for creating OIDC tokens for signing.
-      packages: write # for uploading attestations.
-    if: startsWith(github.ref, 'refs/tags/')
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
-    with:
-      image: ${{ needs.build.outputs.image }}
-      digest: ${{ needs.build.outputs.digest }}
-      registry-username: ${{ github.actor }}
-    secrets:
-      registry-password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
-  gh-attest:
-    needs: [build]
-    permissions:
-      attestations: write
-      id-token: write
-    runs-on: ubuntu-latest
-    steps:
-      - name: Attest
-        uses: actions/attest-build-provenance@v3
-        id: attest
+      - name: Publish release
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          subject-name: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ needs.build.outputs.digest }}
+          distribution: goreleaser
+          version: v2.14.3
+          args: release --clean

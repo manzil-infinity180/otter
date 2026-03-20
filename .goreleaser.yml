@@ -1,0 +1,51 @@
+version: 2
+
+project_name: otter
+
+before:
+  hooks:
+    - go mod download
+    - sh -c "cd frontend && npm ci"
+    - sh -c "cd frontend && npm run build"
+
+builds:
+  - id: otter
+    main: ./main.go
+    binary: otter
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: otter-bundle
+    ids:
+      - otter
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - src: Readme.md
+      - src: frontend/dist/**/*
+        dst: frontend/dist
+
+checksum:
+  name_template: checksums.txt
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    artifacts: checksum
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - ${artifact}
+      - --yes

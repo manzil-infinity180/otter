@@ -1,16 +1,4 @@
-# Copyright 2025 The OtterXf Contributors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+name: otter-reusable
 
 on:
   workflow_call:
@@ -21,15 +9,19 @@ on:
       artifact-download:
         required: false
         type: string
+        default: ""
       artifact-upload-name:
         required: false
         type: string
+        default: ""
       artifact-upload-path:
         required: false
         type: string
+        default: ""
       pre-command:
         required: false
         type: string
+        default: ""
       command:
         required: true
         type: string
@@ -37,8 +29,29 @@ on:
         required: true
         type: string
       attestations:
-        required: true
+        required: false
         type: string
+        default: ""
+      setup-go:
+        required: false
+        type: boolean
+        default: true
+      go-version-file:
+        required: false
+        type: string
+        default: go.mod
+      setup-node:
+        required: false
+        type: boolean
+        default: false
+      node-version:
+        required: false
+        type: string
+        default: "22"
+      node-cache-dependency-path:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -50,40 +63,77 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-           go-version-file: "go.mod"
+          persist-credentials: false
 
-      - if: ${{ inputs.artifact-download != '' }}
+      - name: Set up Go
+        if: ${{ inputs.setup-go }}
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache: true
+
+      - name: Set up Node.js
+        if: ${{ inputs.setup-node && inputs.node-cache-dependency-path == '' }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Set up Node.js with npm cache
+        if: ${{ inputs.setup-node && inputs.node-cache-dependency-path != '' }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.node-cache-dependency-path }}
+
+      - name: Download workflow artifact
+        if: ${{ inputs.artifact-download != '' }}
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           name: ${{ inputs.artifact-download }}
           path: /tmp
 
-      - if: ${{ inputs.pre-command != '' && inputs.pull_request == false }}
+      - name: Run pre-command with witness
+        if: ${{ inputs.pre-command != '' && !inputs.pull_request && inputs.attestations != '' }}
         uses: testifysec/witness-run-action@7aa15e327829f1f2a523365c564c948d5dde69dd
+        env:
+          PRE_COMMAND: ${{ inputs.pre-command }}
         with:
           witness-install-dir: /usr/local/bin
           version: 0.9.1
           step: pre-${{ inputs.step }}
           attestations: ${{ inputs.attestations }}
-          command: /bin/sh -c "${{ inputs.pre-command }}"
-      - if: ${{ inputs.pre-command != '' && inputs.pull_request == true }}
-        run: ${{ inputs.pre-command }}
+          command: /bin/sh -lc "$PRE_COMMAND"
 
-      - if: ${{ inputs.pull_request == false }}
+      - name: Run pre-command
+        if: ${{ inputs.pre-command != '' && (inputs.pull_request || inputs.attestations == '') }}
+        env:
+          PRE_COMMAND: ${{ inputs.pre-command }}
+        run: /bin/sh -lc "$PRE_COMMAND"
+
+      - name: Run command with witness
+        if: ${{ !inputs.pull_request && inputs.attestations != '' }}
         uses: testifysec/witness-run-action@7aa15e327829f1f2a523365c564c948d5dde69dd
+        env:
+          COMMAND: ${{ inputs.command }}
         with:
           witness-install-dir: /usr/local/bin
           version: 0.9.1
           step: ${{ inputs.step }}
           attestations: ${{ inputs.attestations }}
-          command: /bin/sh -c "${{ inputs.command }}"
-      - if: ${{ inputs.pull_request == true }}
-        run: ${{ inputs.command }}
+          command: /bin/sh -lc "$COMMAND"
 
-      - if: ${{ inputs.artifact-upload-path != '' && inputs.artifact-upload-name != ''}}
+      - name: Run command
+        if: ${{ inputs.pull_request || inputs.attestations == '' }}
+        env:
+          COMMAND: ${{ inputs.command }}
+        run: /bin/sh -lc "$COMMAND"
+
+      - name: Upload workflow artifact
+        if: ${{ inputs.artifact-upload-path != '' && inputs.artifact-upload-name != '' }}
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: ${{ inputs.artifact-upload-name }}

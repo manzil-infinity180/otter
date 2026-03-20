@@ -1,0 +1,6 @@
+.git
+.github
+bin
+data
+frontend/dist
+frontend/node_modules
