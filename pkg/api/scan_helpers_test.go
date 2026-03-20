@@ -122,7 +122,7 @@ func TestExecuteCatalogScanAndHelperFallbacks(t *testing.T) {
 	}
 }
 
-func TestGetOrCreateIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t *testing.T) {
+func TestGetOrBuildIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t *testing.T) {
 	t.Parallel()
 
 	store, err := storage.NewLocalStore(t.TempDir())
@@ -145,16 +145,20 @@ func TestGetOrCreateIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t
 
 	handler := NewScanHandlerWithRegistry(store, sbomRepo, vulnRepo, stubAnalyzer{}, stubRegistryService{})
 
-	sbomRecord, err := handler.getOrCreateSBOMRecord(context.Background(), "demo-org", "demo-image", sbomindex.FormatCycloneDX, []byte(testCycloneDXDocument))
-	if err != nil {
-		t.Fatalf("getOrCreateSBOMRecord() error = %v", err)
-	}
 	sbomKey, err := ArtifactKeyBuilder{OrgID: "demo-org", ImageID: "demo-image"}.BuildSBOMKeyForFormat(sbomindex.FormatCycloneDX)
 	if err != nil {
 		t.Fatalf("BuildSBOMKeyForFormat() error = %v", err)
 	}
 	if _, err := store.Put(context.Background(), sbomKey, []byte(testCycloneDXDocument), storage.PutOptions{ContentType: "application/vnd.cyclonedx+json"}); err != nil {
 		t.Fatalf("store.Put(sbom) error = %v", err)
+	}
+	sbomObject, err := store.Get(context.Background(), sbomKey)
+	if err != nil {
+		t.Fatalf("store.Get(sbom) error = %v", err)
+	}
+	sbomRecord, err := handler.getOrBuildSBOMRecord(context.Background(), "demo-org", "demo-image", sbomindex.FormatCycloneDX, sbomObject)
+	if err != nil {
+		t.Fatalf("getOrBuildSBOMRecord() error = %v", err)
 	}
 	sbomRecord.ImageName = "alpine:latest"
 	if _, err := sbomRepo.Save(context.Background(), sbomRecord); err != nil {
@@ -176,9 +180,9 @@ func TestGetOrCreateIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t
 		t.Fatalf("store.Put(vulnerabilities) error = %v", err)
 	}
 
-	vulnRecord, err := handler.getOrCreateVulnerabilityRecord(context.Background(), "demo-org", "demo-image")
+	vulnRecord, err := handler.getOrBuildVulnerabilityRecord(context.Background(), "demo-org", "demo-image")
 	if err != nil {
-		t.Fatalf("getOrCreateVulnerabilityRecord() error = %v", err)
+		t.Fatalf("getOrBuildVulnerabilityRecord() error = %v", err)
 	}
 	if got, want := vulnRecord.Summary.Total, 1; got != want {
 		t.Fatalf("vulnerability total = %d, want %d", got, want)

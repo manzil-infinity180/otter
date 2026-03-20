@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -373,6 +374,145 @@ func TestGetImageSBOMReturnsStructuredDocument(t *testing.T) {
 	}
 	if payload.Format != sbomindex.FormatSPDX || payload.PackageCount != 2 {
 		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestReadOnlyGETsDoNotPersistMissingIndexes(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	keyBuilder := ArtifactKeyBuilder{OrgID: "demo-org", ImageID: "demo-image"}
+	sbomKey, err := keyBuilder.BuildSBOMKeyForFormat(sbomindex.FormatCycloneDX)
+	if err != nil {
+		t.Fatalf("BuildSBOMKeyForFormat() error = %v", err)
+	}
+	if _, err := store.Put(context.Background(), sbomKey, []byte(testCycloneDXDocument), storage.PutOptions{
+		ContentType: "application/vnd.cyclonedx+json",
+		Metadata:    map[string]string{"image_name": "alpine:latest", "platform": "linux/amd64"},
+	}); err != nil {
+		t.Fatalf("store.Put(sbom) error = %v", err)
+	}
+
+	vulnerabilityDocument, err := json.Marshal(testCombinedVulnerabilityReport())
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	vulnerabilityKey, err := keyBuilder.BuildVulnerabilityKey()
+	if err != nil {
+		t.Fatalf("BuildVulnerabilityKey() error = %v", err)
+	}
+	if _, err := store.Put(context.Background(), vulnerabilityKey, vulnerabilityDocument, storage.PutOptions{
+		ContentType: "application/json",
+		Metadata:    map[string]string{"image_name": "alpine:latest", "platform": "linux/amd64"},
+	}); err != nil {
+		t.Fatalf("store.Put(vulnerabilities) error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.GET("/api/v1/images/:id/sbom", handler.GetImageSBOM)
+	router.GET("/api/v1/images/:id/vulnerabilities", handler.GetImageVulnerabilities)
+
+	sbomReq := httptest.NewRequest(http.MethodGet, "/api/v1/images/demo-image/sbom?org_id=demo-org", nil)
+	sbomResp := httptest.NewRecorder()
+	router.ServeHTTP(sbomResp, sbomReq)
+	if got, want := sbomResp.Code, http.StatusOK; got != want {
+		t.Fatalf("sbom status = %d, want %d, body=%s", got, want, sbomResp.Body.String())
+	}
+	if _, err := sbomRepo.Get(context.Background(), "demo-org", "demo-image"); !errors.Is(err, sbomindex.ErrNotFound) {
+		t.Fatalf("sbomRepo.Get() error = %v, want ErrNotFound", err)
+	}
+
+	vulnReq := httptest.NewRequest(http.MethodGet, "/api/v1/images/demo-image/vulnerabilities?org_id=demo-org", nil)
+	vulnResp := httptest.NewRecorder()
+	router.ServeHTTP(vulnResp, vulnReq)
+	if got, want := vulnResp.Code, http.StatusOK; got != want {
+		t.Fatalf("vulnerability status = %d, want %d, body=%s", got, want, vulnResp.Body.String())
+	}
+	if _, err := vulnRepo.Get(context.Background(), "demo-org", "demo-image"); !errors.Is(err, vulnindex.ErrNotFound) {
+		t.Fatalf("vulnRepo.Get() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRepairImageIndexesPersistsMissingIndexesFromArtifacts(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	keyBuilder := ArtifactKeyBuilder{OrgID: "demo-org", ImageID: "demo-image"}
+	sbomKey, err := keyBuilder.BuildSBOMKeyForFormat(sbomindex.FormatCycloneDX)
+	if err != nil {
+		t.Fatalf("BuildSBOMKeyForFormat() error = %v", err)
+	}
+	if _, err := store.Put(context.Background(), sbomKey, []byte(testCycloneDXDocument), storage.PutOptions{
+		ContentType: "application/vnd.cyclonedx+json",
+		Metadata:    map[string]string{"image_name": "alpine:latest", "platform": "linux/amd64"},
+	}); err != nil {
+		t.Fatalf("store.Put(sbom) error = %v", err)
+	}
+
+	vulnerabilityDocument, err := json.Marshal(testCombinedVulnerabilityReport())
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	vulnerabilityKey, err := keyBuilder.BuildVulnerabilityKey()
+	if err != nil {
+		t.Fatalf("BuildVulnerabilityKey() error = %v", err)
+	}
+	if _, err := store.Put(context.Background(), vulnerabilityKey, vulnerabilityDocument, storage.PutOptions{
+		ContentType: "application/json",
+		Metadata:    map[string]string{"image_name": "alpine:latest", "platform": "linux/amd64"},
+	}); err != nil {
+		t.Fatalf("store.Put(vulnerabilities) error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.POST("/api/v1/images/:id/indexes/repair", handler.RepairImageIndexes)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/images/demo-image/indexes/repair?org_id=demo-org", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+	if !bytes.Contains(resp.Body.Bytes(), []byte(`"status":"repaired"`)) {
+		t.Fatalf("expected repaired statuses in response, body=%s", resp.Body.String())
+	}
+
+	if _, err := sbomRepo.Get(context.Background(), "demo-org", "demo-image"); err != nil {
+		t.Fatalf("sbomRepo.Get() error = %v", err)
+	}
+	if _, err := vulnRepo.Get(context.Background(), "demo-org", "demo-image"); err != nil {
+		t.Fatalf("vulnRepo.Get() error = %v", err)
 	}
 }
 
@@ -1216,7 +1356,7 @@ func TestImportImageVEXUpdatesAdvisoryStatus(t *testing.T) {
 	}
 }
 
-func TestCompareImagesBuildsAndStoresComparison(t *testing.T) {
+func TestCompareImagesBuildsReadOnlyReportAndCreateComparisonStoresIt(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
@@ -1321,6 +1461,7 @@ func TestCompareImagesBuildsAndStoresComparison(t *testing.T) {
 	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
 	router := gin.New()
 	router.GET("/api/v1/compare", handler.CompareImages)
+	router.POST("/api/v1/comparisons", handler.CreateComparison)
 	router.GET("/api/v1/comparisons/:id", handler.GetStoredComparison)
 	router.GET("/api/v1/comparisons/:id/export", handler.ExportComparison)
 
@@ -1353,6 +1494,32 @@ func TestCompareImagesBuildsAndStoresComparison(t *testing.T) {
 	}
 	if got, want := payload.Comparison.PackageDiff.Added[0].Name, "curl"; got != want {
 		t.Fatalf("PackageDiff.Added[0].Name = %q, want %q", got, want)
+	}
+
+	comparisonKey, err := BuildComparisonKey(payload.ComparisonID)
+	if err != nil {
+		t.Fatalf("BuildComparisonKey() error = %v", err)
+	}
+	if _, err := store.Get(context.Background(), comparisonKey); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("store.Get(comparison) error = %v, want ErrNotFound", err)
+	}
+
+	createBody, err := json.Marshal(ComparisonPayload{
+		Image1: "alpine:3.19",
+		Image2: "alpine:3.20",
+		Org1:   "demo-org",
+		Org2:   "demo-org",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/comparisons", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp := httptest.NewRecorder()
+	router.ServeHTTP(createResp, createReq)
+
+	if got, want := createResp.Code, http.StatusOK; got != want {
+		t.Fatalf("create status = %d, want %d, body=%s", got, want, createResp.Body.String())
 	}
 
 	storedReq := httptest.NewRequest(http.MethodGet, "/api/v1/comparisons/"+payload.ComparisonID, nil)

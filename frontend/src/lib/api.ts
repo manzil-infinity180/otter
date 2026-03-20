@@ -25,8 +25,8 @@ export function buildAPIURL(path: string, params?: Record<string, string | undef
 }
 
 async function request<T>(path: string, params?: Record<string, string | undefined>): Promise<T> {
-  const url = buildAPIURL(path, params);
-  const response = await fetch(url.toString(), {
+	const url = buildAPIURL(path, params);
+	const response = await fetch(url.toString(), {
     headers: {
       Accept: "application/json"
     }
@@ -37,7 +37,26 @@ async function request<T>(path: string, params?: Record<string, string | undefin
     throw new Error(message || `Request failed with ${response.status}`);
   }
 
-  return (await response.json()) as T;
+	return (await response.json()) as T;
+}
+
+async function postJSON<T>(path: string, body: unknown): Promise<T> {
+	const url = buildAPIURL(path);
+	const response = await fetch(url.toString(), {
+		method: "POST",
+		headers: {
+			Accept: "application/json",
+			"Content-Type": "application/json"
+		},
+		body: JSON.stringify(body)
+	});
+
+	if (!response.ok) {
+		const message = await response.text();
+		throw new Error(message || `Request failed with ${response.status}`);
+	}
+
+	return (await response.json()) as T;
 }
 
 export function listCatalog(params?: {
@@ -88,10 +107,5 @@ export function compareImages(params: {
   org1: string;
   org2: string;
 }) {
-  return request<ComparisonResponse>("/api/v1/compare", {
-    image1: params.image1,
-    image2: params.image2,
-    org1: params.org1,
-    org2: params.org2
-  });
+  return postJSON<ComparisonResponse>("/api/v1/comparisons", params);
 }

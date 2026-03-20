@@ -239,6 +239,17 @@ func TestWorkflowScanViewCompareExport(t *testing.T) {
 	}
 
 	storedCompareResp := performRequest(router, http.MethodGet, "/api/v1/comparisons/"+comparison.ComparisonID, nil, nil)
+	mustStatus(t, storedCompareResp, http.StatusNotFound)
+
+	createCompareResp := performJSONRequest(router, http.MethodPost, "/api/v1/comparisons", ComparisonPayload{
+		Image1: "alpine:3.20",
+		Image2: "alpine:3.19",
+		Org1:   "demo-org",
+		Org2:   "demo-org",
+	})
+	mustStatus(t, createCompareResp, http.StatusOK)
+
+	storedCompareResp = performRequest(router, http.MethodGet, "/api/v1/comparisons/"+comparison.ComparisonID, nil, nil)
 	mustStatus(t, storedCompareResp, http.StatusOK)
 
 	exportCompareResp := performRequest(router, http.MethodGet, "/api/v1/comparisons/"+comparison.ComparisonID+"/export", nil, nil)
@@ -276,6 +287,7 @@ func registerWorkflowRoutes(router *gin.Engine, handler *ScanHandler) {
 	router.GET("/api/v1/images/:id/compliance", handler.GetImageCompliance)
 	router.GET("/api/v1/images/:id/export", handler.ExportImage)
 	router.GET("/api/v1/compare", handler.CompareImages)
+	router.POST("/api/v1/comparisons", handler.CreateComparison)
 	router.GET("/api/v1/comparisons/:id", handler.GetStoredComparison)
 	router.GET("/api/v1/comparisons/:id/export", handler.ExportComparison)
 	router.GET("/browse", handler.BrowseCatalog)

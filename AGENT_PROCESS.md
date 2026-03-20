@@ -24,10 +24,35 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-06` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-07` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-07: remove write side effects from read-only GET endpoints
+
+What changed:
+
+- refactored SBOM and vulnerability read handlers to build transient records from stored artifacts when an index row is missing instead of silently saving rebuilt indexes during GET requests
+- updated the browse page and comparison target resolution to use the same read-only fallback path, so GET requests no longer mutate the vulnerability index as a side effect
+- changed `GET /api/v1/compare` into a pure read-only comparison preview and added `POST /api/v1/comparisons` as the explicit persistence path for stored comparison artifacts and later exports
+- added `POST /api/v1/images/:id/indexes/repair` so operators can explicitly rebuild missing SBOM and vulnerability indexes from already-stored artifacts without relying on request-time backfills
+- updated the frontend comparison client to use the new persisted-comparison POST route and documented the new compare/repair flow in `docs/api.md`
+- added regression coverage proving GET SBOM and vulnerability reads leave indexes absent, GET comparisons no longer write storage, repair requests persist missing indexes, and stored comparison workflows now go through the new POST route
+
+What was verified:
+
+- `go test ./pkg/api ./pkg/routes`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+- `cd frontend && npm test`
+- `cd frontend && npm run build`
+
+Follow-up and rollout notes:
+
+- existing clients that depended on `GET /api/v1/compare` creating a stored artifact now need to call `POST /api/v1/comparisons` before fetching `/api/v1/comparisons/:id` or `/export`
+- the new repair endpoint is intentionally per-image and operator-driven; larger backfill or retention work for historical data still belongs in later queue/cleanup stories
 
 ### OTTER-AUDIT-06: honor platform selection end to end for multi-arch scans
 

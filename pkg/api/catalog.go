@@ -185,7 +185,7 @@ func (h *ScanHandler) BrowseImage(c *gin.Context) {
 		return
 	}
 
-	vulnerabilityRecord, err := h.getOrCreateVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+	vulnerabilityRecord, err := h.getOrBuildVulnerabilityRecord(c.Request.Context(), orgID, imageID)
 	if err != nil && !errors.Is(err, storage.ErrNotFound) && !errors.Is(err, vulnindex.ErrNotFound) {
 		c.String(http.StatusInternalServerError, "load vulnerabilities: %v", err)
 		return

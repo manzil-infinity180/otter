@@ -31,8 +31,10 @@ func TestSetupRoutesRegistersExpectedPaths(t *testing.T) {
 
 	for _, want := range []string{
 		"POST /api/v1/scans",
+		"POST /api/v1/comparisons",
 		"GET /api/v1/catalog",
 		"GET /api/v1/images/:id/overview",
+		"POST /api/v1/images/:id/indexes/repair",
 		"GET /api/v1/compare",
 		"GET /api/v1/aws/scans/:org_id/:image_id",
 		"GET /browse",

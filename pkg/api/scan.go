@@ -45,6 +45,13 @@ type ImageGeneratePayload struct {
 	Async     bool   `json:"async"`
 }
 
+type ComparisonPayload struct {
+	Image1 string `json:"image1"`
+	Image2 string `json:"image2"`
+	Org1   string `json:"org1"`
+	Org2   string `json:"org2"`
+}
+
 type ScanHandler struct {
 	store      storage.Store
 	sbomIndex  sbomindex.Repository
@@ -751,7 +758,7 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 		writeAttachment(c, filename, contentType, object.Data)
 		return
 	case reportexport.FormatCSV, reportexport.FormatJSON, reportexport.FormatSARIF:
-		record, err := h.getOrCreateVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+		record, err := h.getOrBuildVulnerabilityRecord(c.Request.Context(), orgID, imageID)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability report not found"})
@@ -858,7 +865,7 @@ func (h *ScanHandler) GetImageSBOM(c *gin.Context) {
 		return
 	}
 
-	record, err := h.getOrCreateSBOMRecord(c.Request.Context(), orgID, imageID, format, object.Data)
+	record, err := h.getOrBuildSBOMRecord(c.Request.Context(), orgID, imageID, format, object)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load sbom index: %v", err)})
 		return
@@ -882,6 +889,52 @@ func (h *ScanHandler) GetImageSBOM(c *gin.Context) {
 		"dependency_tree":  record.DependencyTree,
 		"document":         json.RawMessage(object.Data),
 		"updated_at":       record.UpdatedAt,
+	})
+}
+
+func (h *ScanHandler) RepairImageIndexes(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
+
+	sbomRecord, sbomStatus, err := h.repairSBOMIndex(c.Request.Context(), orgID, imageID)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) && !errors.Is(err, sbomindex.ErrNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repair sbom index: %v", err)})
+		return
+	}
+
+	vulnerabilityRecord, vulnerabilityStatus, err := h.repairVulnerabilityIndex(c.Request.Context(), orgID, imageID)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) && !errors.Is(err, vulnindex.ErrNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repair vulnerability index: %v", err)})
+		return
+	}
+
+	if sbomStatus == "missing" && vulnerabilityStatus == "missing" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "stored indexes could not be repaired from existing artifacts"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "image indexes repaired",
+		"org_id":          orgID,
+		"image_id":        imageID,
+		"storage_backend": h.store.Backend(),
+		"sbom_index": gin.H{
+			"status":        sbomStatus,
+			"source_format": sbomRecord.SourceFormat,
+			"package_count": sbomRecord.PackageCount,
+			"updated_at":    sbomRecord.UpdatedAt,
+		},
+		"vulnerability_index": gin.H{
+			"status":              vulnerabilityStatus,
+			"vulnerability_count": len(vulnerabilityRecord.Vulnerabilities),
+			"updated_at":          vulnerabilityRecord.UpdatedAt,
+		},
 	})
 }
 
@@ -1030,7 +1083,7 @@ func (h *ScanHandler) GetImageVulnerabilities(c *gin.Context) {
 		return
 	}
 
-	record, err := h.getOrCreateVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+	record, err := h.getOrBuildVulnerabilityRecord(c.Request.Context(), orgID, imageID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability report not found"})
@@ -1109,77 +1162,27 @@ func (h *ScanHandler) GetImageAttestations(c *gin.Context) {
 }
 
 func (h *ScanHandler) CompareImages(c *gin.Context) {
-	image1Ref := strings.TrimSpace(c.Query("image1"))
-	image2Ref := strings.TrimSpace(c.Query("image2"))
-	if image1Ref == "" || image2Ref == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "image1 and image2 are required"})
-		return
-	}
-	org1 := strings.TrimSpace(c.Query("org1"))
-	org2 := strings.TrimSpace(c.Query("org2"))
-	if org1 != "" && !authorizeOrgRequest(c, org1) {
-		return
-	}
-	if org2 != "" && !authorizeOrgRequest(c, org2) {
-		return
-	}
-	allowedOrgs := authorizedOrgSet(c)
-
-	target1, err := h.resolveComparisonTarget(c.Request.Context(), image1Ref, org1, allowedOrgs)
-	if err != nil {
-		h.renderComparisonLookupError(c, "image1", err)
-		return
-	}
-	target2, err := h.resolveComparisonTarget(c.Request.Context(), image2Ref, org2, allowedOrgs)
-	if err != nil {
-		h.renderComparisonLookupError(c, "image2", err)
-		return
+	payload := ComparisonPayload{
+		Image1: strings.TrimSpace(c.Query("image1")),
+		Image2: strings.TrimSpace(c.Query("image2")),
+		Org1:   strings.TrimSpace(c.Query("org1")),
+		Org2:   strings.TrimSpace(c.Query("org2")),
 	}
 
-	report, err := compare.BuildReport(compare.Inputs{
-		Image1:           target1.SBOM,
-		Image2:           target2.SBOM,
-		Vulnerabilities1: target1.Vulnerabilities,
-		Vulnerabilities2: target2.Vulnerabilities,
-		CycloneDX1:       target1.CycloneDXDocument,
-		CycloneDX2:       target2.CycloneDXDocument,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison: %v", err)})
+	if err := h.respondComparison(c, payload, false); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	}
+}
+
+func (h *ScanHandler) CreateComparison(c *gin.Context) {
+	var payload ComparisonPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	document, err := compare.MarshalReport(report)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("marshal comparison: %v", err)})
-		return
+	if err := h.respondComparison(c, payload, true); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
-
-	key, err := BuildComparisonKey(report.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison key: %v", err)})
-		return
-	}
-
-	info, err := h.store.Put(c.Request.Context(), key, document, storage.PutOptions{
-		ContentType: "application/json",
-		Metadata: map[string]string{
-			"artifact": "comparison",
-			"image1":   target1.SBOM.ImageName,
-			"image2":   target2.SBOM.ImageName,
-		},
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store comparison: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"comparison_id":   report.ID,
-		"storage_backend": h.store.Backend(),
-		"comparison_file": toObjectResponse(info),
-		"comparison":      report,
-	})
 }
 
 func (h *ScanHandler) GetStoredComparison(c *gin.Context) {
@@ -1342,7 +1345,7 @@ func (h *ScanHandler) getSBOMArtifact(ctx context.Context, keyBuilder ArtifactKe
 	return storage.Object{}, err
 }
 
-func (h *ScanHandler) getOrCreateSBOMRecord(ctx context.Context, orgID, imageID, format string, document []byte) (sbomindex.Record, error) {
+func (h *ScanHandler) getOrBuildSBOMRecord(ctx context.Context, orgID, imageID, format string, object storage.Object) (sbomindex.Record, error) {
 	record, err := h.sbomIndex.Get(ctx, orgID, imageID)
 	if err == nil {
 		return record, nil
@@ -1351,14 +1354,10 @@ func (h *ScanHandler) getOrCreateSBOMRecord(ctx context.Context, orgID, imageID,
 		return sbomindex.Record{}, err
 	}
 
-	record, err = sbomindex.BuildRecordFromDocument(orgID, imageID, "", format, document)
-	if err != nil {
-		return sbomindex.Record{}, err
-	}
-	return h.sbomIndex.Save(ctx, record)
+	return h.buildSBOMRecordFromArtifact(ctx, orgID, imageID, format, object)
 }
 
-func (h *ScanHandler) getOrCreateVulnerabilityRecord(ctx context.Context, orgID, imageID string) (vulnindex.Record, error) {
+func (h *ScanHandler) getOrBuildVulnerabilityRecord(ctx context.Context, orgID, imageID string) (vulnindex.Record, error) {
 	record, err := h.vulnIndex.Get(ctx, orgID, imageID)
 	if err == nil {
 		return record, nil
@@ -1376,11 +1375,7 @@ func (h *ScanHandler) getOrCreateVulnerabilityRecord(ctx context.Context, orgID,
 		return vulnindex.Record{}, err
 	}
 
-	record, err = vulnindex.BuildRecordFromDocument(orgID, imageID, "", object.Data, nil, vulnindex.BuildOptions{})
-	if err != nil {
-		return vulnindex.Record{}, err
-	}
-	return h.vulnIndex.Save(ctx, record)
+	return h.buildVulnerabilityRecordFromArtifact(ctx, orgID, imageID, object)
 }
 
 func (h *ScanHandler) getExistingVulnerabilityRecord(ctx context.Context, orgID, imageID string) (*vulnindex.Record, error) {
@@ -1392,6 +1387,120 @@ func (h *ScanHandler) getExistingVulnerabilityRecord(ctx context.Context, orgID,
 		return nil, nil
 	}
 	return nil, err
+}
+
+func (h *ScanHandler) getExistingSBOMRecord(ctx context.Context, orgID, imageID string) (*sbomindex.Record, error) {
+	record, err := h.sbomIndex.Get(ctx, orgID, imageID)
+	if err == nil {
+		return &record, nil
+	}
+	if errors.Is(err, sbomindex.ErrNotFound) {
+		return nil, nil
+	}
+	return nil, err
+}
+
+func (h *ScanHandler) buildSBOMRecordFromArtifact(ctx context.Context, orgID, imageID, format string, object storage.Object) (sbomindex.Record, error) {
+	imageName := strings.TrimSpace(object.Info.Metadata["image_name"])
+	if imageName == "" {
+		record, err := h.getExistingVulnerabilityRecord(ctx, orgID, imageID)
+		if err != nil {
+			return sbomindex.Record{}, err
+		}
+		if record != nil {
+			imageName = record.ImageName
+		}
+	}
+
+	record, err := sbomindex.BuildRecordFromDocument(orgID, imageID, imageName, format, object.Data)
+	if err != nil {
+		return sbomindex.Record{}, err
+	}
+	if platform := strings.TrimSpace(object.Info.Metadata["platform"]); platform != "" {
+		record.Platform = platform
+	}
+	return record, nil
+}
+
+func (h *ScanHandler) buildVulnerabilityRecordFromArtifact(ctx context.Context, orgID, imageID string, object storage.Object) (vulnindex.Record, error) {
+	imageName := strings.TrimSpace(object.Info.Metadata["image_name"])
+	if imageName == "" {
+		record, err := h.getExistingSBOMRecord(ctx, orgID, imageID)
+		if err != nil {
+			return vulnindex.Record{}, err
+		}
+		if record != nil {
+			imageName = record.ImageName
+		}
+	}
+
+	record, err := vulnindex.BuildRecordFromDocument(orgID, imageID, imageName, object.Data, nil, vulnindex.BuildOptions{})
+	if err != nil {
+		return vulnindex.Record{}, err
+	}
+	if platform := strings.TrimSpace(object.Info.Metadata["platform"]); platform != "" {
+		record.Platform = platform
+	}
+	return record, nil
+}
+
+func (h *ScanHandler) repairSBOMIndex(ctx context.Context, orgID, imageID string) (sbomindex.Record, string, error) {
+	record, err := h.sbomIndex.Get(ctx, orgID, imageID)
+	if err == nil {
+		return record, "present", nil
+	}
+	if !errors.Is(err, sbomindex.ErrNotFound) {
+		return sbomindex.Record{}, "", err
+	}
+
+	keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
+	for _, format := range []string{sbomindex.FormatCycloneDX, sbomindex.FormatSPDX} {
+		object, err := h.getSBOMArtifact(ctx, keyBuilder, format)
+		switch {
+		case err == nil:
+			record, err := h.buildSBOMRecordFromArtifact(ctx, orgID, imageID, format, object)
+			if err != nil {
+				return sbomindex.Record{}, "", err
+			}
+			record, err = h.sbomIndex.Save(ctx, record)
+			return record, "repaired", err
+		case errors.Is(err, storage.ErrNotFound):
+			continue
+		default:
+			return sbomindex.Record{}, "", err
+		}
+	}
+
+	return sbomindex.Record{}, "missing", storage.ErrNotFound
+}
+
+func (h *ScanHandler) repairVulnerabilityIndex(ctx context.Context, orgID, imageID string) (vulnindex.Record, string, error) {
+	record, err := h.vulnIndex.Get(ctx, orgID, imageID)
+	if err == nil {
+		return record, "present", nil
+	}
+	if !errors.Is(err, vulnindex.ErrNotFound) {
+		return vulnindex.Record{}, "", err
+	}
+
+	key, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildVulnerabilityKey()
+	if err != nil {
+		return vulnindex.Record{}, "", err
+	}
+	object, err := h.store.Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return vulnindex.Record{}, "missing", err
+		}
+		return vulnindex.Record{}, "", err
+	}
+
+	record, err = h.buildVulnerabilityRecordFromArtifact(ctx, orgID, imageID, object)
+	if err != nil {
+		return vulnindex.Record{}, "", err
+	}
+	record, err = h.vulnIndex.Save(ctx, record)
+	return record, "repaired", err
 }
 
 func (h *ScanHandler) resolveStoredImageReference(ctx context.Context, orgID, imageID string) (string, error) {
@@ -1494,7 +1603,7 @@ func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, or
 		return comparisonTarget{}, err
 	}
 
-	vulnerabilities, err := h.getOrCreateVulnerabilityRecord(ctx, record.OrgID, record.ImageID)
+	vulnerabilities, err := h.getOrBuildVulnerabilityRecord(ctx, record.OrgID, record.ImageID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
 			vulnerabilities = vulnindex.Record{
@@ -1517,6 +1626,87 @@ func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, or
 		Vulnerabilities:   vulnerabilities,
 		CycloneDXDocument: object.Data,
 	}, nil
+}
+
+func (h *ScanHandler) respondComparison(c *gin.Context, payload ComparisonPayload, persist bool) error {
+	payload.Image1 = strings.TrimSpace(payload.Image1)
+	payload.Image2 = strings.TrimSpace(payload.Image2)
+	payload.Org1 = strings.TrimSpace(payload.Org1)
+	payload.Org2 = strings.TrimSpace(payload.Org2)
+
+	if payload.Image1 == "" || payload.Image2 == "" {
+		return errors.New("image1 and image2 are required")
+	}
+	if payload.Org1 != "" && !authorizeOrgRequest(c, payload.Org1) {
+		return nil
+	}
+	if payload.Org2 != "" && !authorizeOrgRequest(c, payload.Org2) {
+		return nil
+	}
+	allowedOrgs := authorizedOrgSet(c)
+
+	target1, err := h.resolveComparisonTarget(c.Request.Context(), payload.Image1, payload.Org1, allowedOrgs)
+	if err != nil {
+		h.renderComparisonLookupError(c, "image1", err)
+		return nil
+	}
+	target2, err := h.resolveComparisonTarget(c.Request.Context(), payload.Image2, payload.Org2, allowedOrgs)
+	if err != nil {
+		h.renderComparisonLookupError(c, "image2", err)
+		return nil
+	}
+
+	report, err := compare.BuildReport(compare.Inputs{
+		Image1:           target1.SBOM,
+		Image2:           target2.SBOM,
+		Vulnerabilities1: target1.Vulnerabilities,
+		Vulnerabilities2: target2.Vulnerabilities,
+		CycloneDX1:       target1.CycloneDXDocument,
+		CycloneDX2:       target2.CycloneDXDocument,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison: %v", err)})
+		return nil
+	}
+
+	response := gin.H{
+		"comparison_id":   report.ID,
+		"storage_backend": h.store.Backend(),
+		"comparison":      report,
+	}
+	if !persist {
+		c.JSON(http.StatusOK, response)
+		return nil
+	}
+
+	document, err := compare.MarshalReport(report)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("marshal comparison: %v", err)})
+		return nil
+	}
+
+	key, err := BuildComparisonKey(report.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison key: %v", err)})
+		return nil
+	}
+
+	info, err := h.store.Put(c.Request.Context(), key, document, storage.PutOptions{
+		ContentType: "application/json",
+		Metadata: map[string]string{
+			"artifact": "comparison",
+			"image1":   target1.SBOM.ImageName,
+			"image2":   target2.SBOM.ImageName,
+		},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store comparison: %v", err)})
+		return nil
+	}
+
+	response["comparison_file"] = toObjectResponse(info)
+	c.JSON(http.StatusOK, response)
+	return nil
 }
 
 func (h *ScanHandler) renderComparisonLookupError(c *gin.Context, field string, err error) {

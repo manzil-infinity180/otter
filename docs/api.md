@@ -124,16 +124,36 @@ Behavior:
 - compares packages as added, removed, and changed components
 - compares vulnerabilities as new, fixed, and unchanged findings
 - derives layer changes from stored CycloneDX SBOM metadata (`syft:location:*:layerID`)
-- stores the comparison report as `otterxf/comparisons/<comparison-id>/comparison.json`
+- does not write storage; it returns a read-only diff preview
 
 Response includes:
 
 - deterministic `comparison_id`
 - summary message in the form `Image B has X fewer vulns and Y fewer packages`
 - package, vulnerability, layer, and SBOM diffs
-- stored comparison artifact metadata
 
 If the same image reference exists in multiple orgs, Otter returns `409 Conflict` until `org1` or `org2` is provided.
+
+## Persist a comparison report
+
+`POST /api/v1/comparisons`
+
+Request body:
+
+```json
+{
+  "image1": "alpine:3.19",
+  "image2": "alpine:3.20",
+  "org1": "demo-org",
+  "org2": "demo-org"
+}
+```
+
+Behavior:
+
+- builds the same comparison payload as `GET /api/v1/compare`
+- stores the report as `otterxf/comparisons/<comparison-id>/comparison.json`
+- returns the persisted artifact metadata for later retrieval/export
 
 ## Get a stored comparison
 
@@ -231,6 +251,16 @@ Response includes:
 - dependency tree
 
 If `format` is omitted, Otter returns the CycloneDX document.
+
+## Repair missing image indexes
+
+`POST /api/v1/images/:id/indexes/repair?org_id=default_org`
+
+Behavior:
+
+- rebuilds the SBOM and vulnerability indexes from already-stored scan artifacts
+- leaves existing index rows untouched when they are already present
+- returns `404` if Otter cannot find any stored artifacts to rebuild from
 
 ## Import image SBOM
 
