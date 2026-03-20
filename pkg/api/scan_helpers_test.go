@@ -264,6 +264,51 @@ func TestResolveStoredImageReferenceFallsBackToArtifactMetadata(t *testing.T) {
 	}
 }
 
+func TestResolveStoredImageReferenceFallsBackToPersistedArtifactMetadata(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sbomRepo.Close() })
+
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	t.Cleanup(func() { _ = vulnRepo.Close() })
+
+	key, err := ArtifactKeyBuilder{OrgID: "fallback-org", ImageID: "fallback-image"}.BuildSBOMKey()
+	if err != nil {
+		t.Fatalf("BuildSBOMKey() error = %v", err)
+	}
+	if _, err := store.Put(context.Background(), key, []byte(testCycloneDXDocument), storage.PutOptions{
+		ContentType: "application/vnd.cyclonedx+json",
+		Metadata: map[string]string{
+			"image_name":           "nginx:latest",
+			"availability_message": "scanner unavailable",
+		},
+	}); err != nil {
+		t.Fatalf("store.Put() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	imageRef, err := handler.resolveStoredImageReference(context.Background(), "fallback-org", "fallback-image")
+	if err != nil {
+		t.Fatalf("resolveStoredImageReference() error = %v", err)
+	}
+	if got, want := imageRef, "nginx:latest"; got != want {
+		t.Fatalf("imageRef = %q, want %q", got, want)
+	}
+}
+
 func TestRenderComparisonLookupErrorAndFilenameHelpers(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)

@@ -42,7 +42,7 @@ func TestPostgresStoreErrorPaths(t *testing.T) {
 	key := "otterxf/demo-org/demo-image/sbom.json"
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT content_type, payload, size_bytes, created_at
+SELECT content_type, payload, size_bytes, created_at, metadata
 FROM scan_artifacts
 WHERE key = $1;
 `)).
@@ -53,7 +53,7 @@ WHERE key = $1;
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT key, content_type, size_bytes, created_at
+SELECT key, content_type, size_bytes, created_at, metadata
 FROM scan_artifacts
 WHERE key LIKE $1
 ORDER BY key;

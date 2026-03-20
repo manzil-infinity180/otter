@@ -19,6 +19,21 @@ type BucketBasics struct {
 	S3Client *s3.Client
 }
 
+type ObjectData struct {
+	Data         []byte
+	ContentType  string
+	Metadata     map[string]string
+	LastModified time.Time
+}
+
+type ObjectSummary struct {
+	Key          string
+	Size         int64
+	ContentType  string
+	Metadata     map[string]string
+	LastModified time.Time
+}
+
 func (basics BucketBasics) GetPresignedURL(ctx context.Context, bucketName, key string, expiration time.Duration) (string, error) {
 	presignClient := s3.NewPresignClient(basics.S3Client)
 
@@ -91,7 +106,7 @@ func (bucket BucketBasics) CreateBucket(ctx context.Context, name string, region
 	return err
 }
 
-func (bucket BucketBasics) UploadFile(ctx context.Context, bucketName string, objectKey string, fileName string) error {
+func (bucket BucketBasics) UploadFile(ctx context.Context, bucketName string, objectKey string, fileName string, contentType string, metadata map[string]string) error {
 	file, err := os.Open(fileName)
 	if err != nil {
 		log.Printf("Couldn't open file %v to upload. Here's why: %v\n", fileName, err)
@@ -102,9 +117,11 @@ func (bucket BucketBasics) UploadFile(ctx context.Context, bucketName string, ob
 			}
 		}()
 		_, err := bucket.S3Client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(objectKey),
-			Body:   file,
+			Bucket:      aws.String(bucketName),
+			Key:         aws.String(objectKey),
+			Body:        file,
+			ContentType: aws.String(contentType),
+			Metadata:    metadata,
 		})
 
 		if err != nil {
@@ -128,7 +145,7 @@ func (bucket BucketBasics) UploadFile(ctx context.Context, bucketName string, ob
 	return err
 }
 
-func (bucket BucketBasics) DownloadFile(ctx context.Context, bucketName string, objectKey string, fileName string) error {
+func (bucket BucketBasics) GetObject(ctx context.Context, bucketName string, objectKey string) (ObjectData, error) {
 	result, err := bucket.S3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(objectKey),
@@ -141,13 +158,36 @@ func (bucket BucketBasics) DownloadFile(ctx context.Context, bucketName string, 
 		} else {
 			log.Printf("Couldn't get object %v:%v. Here's why: %v\n", bucketName, objectKey, err)
 		}
-		return err
+		return ObjectData{}, err
 	}
 	defer func() {
 		if err := result.Body.Close(); err != nil {
 			log.Printf("failed to close file: %v", err)
 		}
 	}()
+
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		log.Printf("Couldn't read object body from %v. Here's why: %v\n", objectKey, err)
+		return ObjectData{}, err
+	}
+
+	object := ObjectData{
+		Data:        body,
+		ContentType: aws.ToString(result.ContentType),
+		Metadata:    result.Metadata,
+	}
+	if result.LastModified != nil {
+		object.LastModified = result.LastModified.UTC()
+	}
+	return object, nil
+}
+
+func (bucket BucketBasics) DownloadFile(ctx context.Context, bucketName string, objectKey string, fileName string) error {
+	object, err := bucket.GetObject(ctx, bucketName, objectKey)
+	if err != nil {
+		return err
+	}
 	file, err := os.Create(fileName)
 	if err != nil {
 		log.Printf("Couldn't create file %v. Here's why: %v\n", fileName, err)
@@ -158,23 +198,21 @@ func (bucket BucketBasics) DownloadFile(ctx context.Context, bucketName string, 
 			log.Printf("failed to close file: %v", err)
 		}
 	}()
-	// we care about the result.Body , don't need to save it to another file
-	body, err := io.ReadAll(result.Body)
-	if err != nil {
-		log.Printf("Couldn't read object body from %v. Here's why: %v\n", objectKey, err)
-	}
-	_, err = file.Write(body)
+	_, err = file.Write(object.Data)
 	return err
 }
 
 // ListObjects lists the objects in a bucket.
-func (bucket BucketBasics) ListObjects(ctx context.Context, bucketName string) ([]types.Object, error) {
+func (bucket BucketBasics) ListObjects(ctx context.Context, bucketName string, prefix string) ([]ObjectSummary, error) {
 	var err error
 	var output *s3.ListObjectsV2Output
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucketName),
 	}
-	var objects []types.Object
+	if prefix != "" {
+		input.Prefix = aws.String(prefix)
+	}
+	var objects []ObjectSummary
 	objectPaginator := s3.NewListObjectsV2Paginator(bucket.S3Client, input)
 	for objectPaginator.HasMorePages() {
 		output, err = objectPaginator.NextPage(ctx)
@@ -186,7 +224,34 @@ func (bucket BucketBasics) ListObjects(ctx context.Context, bucketName string) (
 			}
 			break
 		} else {
-			objects = append(objects, output.Contents...)
+			for _, object := range output.Contents {
+				if object.Key == nil {
+					continue
+				}
+				head, headErr := bucket.S3Client.HeadObject(ctx, &s3.HeadObjectInput{
+					Bucket: aws.String(bucketName),
+					Key:    object.Key,
+				})
+				if headErr != nil {
+					err = headErr
+					break
+				}
+				summary := ObjectSummary{
+					Key:         *object.Key,
+					ContentType: aws.ToString(head.ContentType),
+					Metadata:    head.Metadata,
+				}
+				if object.Size != nil {
+					summary.Size = *object.Size
+				}
+				if object.LastModified != nil {
+					summary.LastModified = object.LastModified.UTC()
+				}
+				objects = append(objects, summary)
+			}
+			if err != nil {
+				break
+			}
 		}
 	}
 	return objects, err

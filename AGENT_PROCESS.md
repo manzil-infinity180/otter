@@ -24,10 +24,32 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-04` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-05` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-05: persist artifact metadata across local, PostgreSQL, and S3 backends
+
+What changed:
+
+- added shared storage metadata helpers so artifact `metadata` maps are cloned, marshaled, and encoded consistently instead of only surviving the immediate `Put` response path
+- updated the local filesystem backend to write a sidecar `.meta.json` file per artifact and to read persisted content type, metadata, and timestamps back through `Get` and `List`
+- added a PostgreSQL migration for a nullable `scan_artifacts.metadata` JSONB column and updated the store queries so metadata round-trips through `Put`, `Get`, and `List`
+- refactored the S3 backend to persist content type on upload, wrap artifact metadata into a single encoded S3 metadata envelope, and reload it through `GetObject` and `ListObjects`
+- added regression coverage for local restart-safe metadata persistence, PostgreSQL metadata query round-tripping, S3 metadata/content-type round-tripping, and stored image reference fallback using a real persisted local artifact
+
+What was verified:
+
+- `go test ./pkg/storage ./pkg/api`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- existing artifacts written before this remediation keep their payloads, but they do not magically gain persisted metadata; operators should re-scan or re-import artifacts if they need metadata-backed fallback behavior on older records
+- the local backend now maintains one metadata sidecar per stored artifact, and the S3 backend now performs a head/read of object metadata during listings; this fixes correctness first, while later performance work should optimize listing behavior if S3-backed catalogs grow large
 
 ### OTTER-AUDIT-04: audit events for scans, deletes, imports, and registry changes
 
