@@ -56,10 +56,11 @@ type ImageOverview struct {
 }
 
 type catalogFilters struct {
-	OrgID    string
-	Query    string
-	Severity string
-	SortBy   string
+	OrgID       string
+	Query       string
+	Severity    string
+	SortBy      string
+	AllowedOrgs map[string]struct{}
 }
 
 type imageReferenceParts struct {
@@ -74,6 +75,9 @@ func (h *ScanHandler) ListCatalog(c *gin.Context) {
 	filters, err := parseCatalogFilters(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeCatalogFilters(c, &filters) {
 		return
 	}
 
@@ -102,6 +106,9 @@ func (h *ScanHandler) GetImageOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
 	overview, err := h.buildImageOverview(c.Request.Context(), orgID, imageID)
 	if err != nil {
@@ -121,6 +128,9 @@ func (h *ScanHandler) BrowseCatalog(c *gin.Context) {
 	filters, err := parseCatalogFilters(c)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if !authorizeCatalogFilters(c, &filters) {
 		return
 	}
 
@@ -150,6 +160,9 @@ func (h *ScanHandler) BrowseImage(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Param("org_id"), c.Param("id"))
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -375,6 +388,11 @@ func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID str
 }
 
 func matchesCatalogFilters(entry ImageCatalogEntry, filters catalogFilters) bool {
+	if len(filters.AllowedOrgs) > 0 {
+		if _, ok := filters.AllowedOrgs[entry.OrgID]; !ok {
+			return false
+		}
+	}
 	if filters.OrgID != "" && entry.OrgID != filters.OrgID {
 		return false
 	}

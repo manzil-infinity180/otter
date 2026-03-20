@@ -1,7 +1,9 @@
 package api
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/otterXf/otter/pkg/storage"
 )
@@ -54,11 +56,13 @@ func BuildComparisonKey(comparisonID string) (string, error) {
 }
 
 func normalizeArtifactIDs(orgID, imageID string) (string, string, error) {
+	orgID = strings.TrimSpace(orgID)
+	imageID = strings.TrimSpace(imageID)
 	if orgID == "" {
-		orgID = "default_org"
+		return "", "", errors.New("org_id is required")
 	}
 	if imageID == "" {
-		imageID = "default_image"
+		return "", "", errors.New("image_id is required")
 	}
 	if err := storage.ValidateSegment("org_id", orgID); err != nil {
 		return "", "", err

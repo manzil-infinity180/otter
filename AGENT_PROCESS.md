@@ -21,11 +21,37 @@ Recommended reading order for a future agent:
 
 ## Project Status
 
-The Ralph development track for Otter is complete.
+The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
-All PRD stories in `scripts/ralph/otter/prd.json` are marked complete:
+- Product stories `OTTER-001` through `OTTER-013` remain complete.
+- Audit story `OTTER-AUDIT-01` is complete in this pass.
+- Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
-- `OTTER-001` through `OTTER-013`
+## Latest Audit Remediation
+
+### OTTER-AUDIT-01: authentication, authorization, and org isolation
+
+What changed:
+
+- added a token-based auth layer in `pkg/auth` with explicit org scopes, optional admin tokens, and support for `Authorization: Bearer`, `X-Otter-API-Token`, or `otter_api_token` cookie credentials
+- enabled auth middleware in the real Gin router and protected all `/api/v1/**`, `/api/v1/aws/**`, and server-rendered `/browse` routes
+- made registry configuration/listing admin-only because those endpoints mutate or expose global registry state
+- enforced org access checks inside scan, image, catalog, job, and comparison handlers so callers cannot read or modify resources outside their assigned orgs
+- removed implicit `default_org` and `default_image` fallbacking from artifact ID normalization so write paths now require explicit org and image IDs
+- restricted catalog listings and comparison resolution to the authenticated identity's allowed org set when auth is enabled
+- added route-level regression tests for unauthenticated requests, cross-org access, admin-only registry access, and stored comparison access
+
+What was verified:
+
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- auth now defaults to enabled in the main server; operators must provide `OTTER_AUTH_TOKENS` or `OTTER_AUTH_TOKENS_FILE`, or explicitly set `OTTER_AUTH_ENABLED=false` for a localhost/demo-only deployment
+- the token configuration format is a JSON array of `{token, subject, orgs, admin}` records
+- the SPA remains static, so browser-based access should use the `otter_api_token` cookie or a same-origin proxy/header injection strategy until a first-class login/session flow exists
 
 ## What Exists Today
 

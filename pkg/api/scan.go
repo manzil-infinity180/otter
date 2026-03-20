@@ -117,6 +117,16 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	orgID, imageID, err := normalizeArtifactIDs(payload.OrgID, payload.ImageID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
+	payload.OrgID = orgID
+	payload.ImageID = imageID
 
 	if payload.Async || strings.EqualFold(c.Query("async"), "true") {
 		request, err := catalogscan.NewRequest(payload.OrgID, payload.ImageID, payload.ImageName, payload.Registry, catalogscan.SourceAPI, catalogscan.TriggerManual)
@@ -168,6 +178,9 @@ func (h *ScanHandler) GetScanJob(c *gin.Context) {
 	job, ok := h.jobs.Get(jobID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scan job not found"})
+		return
+	}
+	if !authorizeOrgRequest(c, job.Request.OrgID) {
 		return
 	}
 
@@ -422,6 +435,9 @@ func (h *ScanHandler) GetImageScans(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
 	prefix, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildImagePrefix()
 	if err != nil {
@@ -456,6 +472,9 @@ func (h *ScanHandler) DeleteImageScansHandler(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Param("org_id"), c.Param("image_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -501,6 +520,9 @@ func (h *ScanHandler) DownloadScanFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
 	filename := c.Param("filename")
 	if err := validateDownloadFilename(filename); err != nil {
@@ -536,6 +558,9 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -629,6 +654,14 @@ func (h *ScanHandler) ExportComparison(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load comparison export: %v", err)})
 		return
 	}
+	var report compare.Report
+	if err := json.Unmarshal(object.Data, &report); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("decode comparison report: %v", err)})
+		return
+	}
+	if !authorizeComparisonReport(c, report) {
+		return
+	}
 
 	filename, err := buildComparisonExportFilename(comparisonID)
 	if err != nil {
@@ -646,6 +679,9 @@ func (h *ScanHandler) GetImageSBOM(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -697,6 +733,9 @@ func (h *ScanHandler) ImportImageSBOM(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -813,6 +852,9 @@ func (h *ScanHandler) GetImageVulnerabilities(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
 	record, err := h.getOrCreateVulnerabilityRecord(c.Request.Context(), orgID, imageID)
 	if err != nil {
@@ -858,6 +900,9 @@ func (h *ScanHandler) GetImageAttestations(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
 	imageRef, err := h.resolveStoredImageReference(c.Request.Context(), orgID, imageID)
 	if err != nil {
@@ -896,13 +941,22 @@ func (h *ScanHandler) CompareImages(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "image1 and image2 are required"})
 		return
 	}
+	org1 := strings.TrimSpace(c.Query("org1"))
+	org2 := strings.TrimSpace(c.Query("org2"))
+	if org1 != "" && !authorizeOrgRequest(c, org1) {
+		return
+	}
+	if org2 != "" && !authorizeOrgRequest(c, org2) {
+		return
+	}
+	allowedOrgs := authorizedOrgSet(c)
 
-	target1, err := h.resolveComparisonTarget(c.Request.Context(), image1Ref, strings.TrimSpace(c.Query("org1")))
+	target1, err := h.resolveComparisonTarget(c.Request.Context(), image1Ref, org1, allowedOrgs)
 	if err != nil {
 		h.renderComparisonLookupError(c, "image1", err)
 		return
 	}
-	target2, err := h.resolveComparisonTarget(c.Request.Context(), image2Ref, strings.TrimSpace(c.Query("org2")))
+	target2, err := h.resolveComparisonTarget(c.Request.Context(), image2Ref, org2, allowedOrgs)
 	if err != nil {
 		h.renderComparisonLookupError(c, "image2", err)
 		return
@@ -977,6 +1031,9 @@ func (h *ScanHandler) GetStoredComparison(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("decode comparison report: %v", err)})
 		return
 	}
+	if !authorizeComparisonReport(c, report) {
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"comparison_id":   comparisonID,
@@ -990,6 +1047,9 @@ func (h *ScanHandler) ImportImageVEX(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -1202,7 +1262,7 @@ type comparisonTarget struct {
 var errComparisonTargetAmbiguous = errors.New("comparison target is ambiguous")
 var errComparisonTargetNotFound = errors.New("comparison target not found")
 
-func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, orgID string) (comparisonTarget, error) {
+func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, orgID string, allowedOrgs map[string]struct{}) (comparisonTarget, error) {
 	if err := validateImageReference(imageName); err != nil {
 		return comparisonTarget{}, err
 	}
@@ -1219,9 +1279,15 @@ func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, or
 
 	filtered := make([]sbomindex.Record, 0, len(records))
 	for _, record := range records {
-		if orgID == "" || record.OrgID == orgID {
-			filtered = append(filtered, record)
+		if orgID != "" && record.OrgID != orgID {
+			continue
 		}
+		if len(allowedOrgs) > 0 {
+			if _, ok := allowedOrgs[record.OrgID]; !ok {
+				continue
+			}
+		}
+		filtered = append(filtered, record)
 	}
 	if len(filtered) == 0 {
 		return comparisonTarget{}, errComparisonTargetNotFound

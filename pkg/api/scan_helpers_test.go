@@ -203,11 +203,11 @@ func TestGetOrCreateIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t
 	if _, err := sbomRepo.Save(context.Background(), secondRecord); err != nil {
 		t.Fatalf("sbomRepo.Save(secondRecord) error = %v", err)
 	}
-	if _, err := handler.resolveComparisonTarget(context.Background(), "alpine:latest", ""); !errors.Is(err, errComparisonTargetAmbiguous) {
+	if _, err := handler.resolveComparisonTarget(context.Background(), "alpine:latest", "", nil); !errors.Is(err, errComparisonTargetAmbiguous) {
 		t.Fatalf("resolveComparisonTarget() error = %v, want ambiguous", err)
 	}
 
-	comparisonTarget, err := handler.resolveComparisonTarget(context.Background(), "alpine:latest", "demo-org")
+	comparisonTarget, err := handler.resolveComparisonTarget(context.Background(), "alpine:latest", "demo-org", nil)
 	if err != nil {
 		t.Fatalf("resolveComparisonTarget(org-scoped) error = %v", err)
 	}
