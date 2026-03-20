@@ -30,6 +30,9 @@ Useful environment variables:
 - `OTTER_REGISTRY_ALLOW_INSECURE`
 - `OTTER_REGISTRY_SECRET_KEY`
 - `OTTER_REGISTRY_SECRET_KEY_FILE`
+- `OTTER_AUDIT_ENABLED`
+- `OTTER_AUDIT_OUTPUTS`
+- `OTTER_AUDIT_FILE`
 - `OTTER_POSTGRES_DSN`
 - `OTTER_POSTGRES_MIGRATIONS`
 - `OTTER_TRIVY_ENABLED`
@@ -82,6 +85,8 @@ Registry egress is policy-controlled by default:
 - `OTTER_REGISTRY_ALLOWLIST` and `OTTER_REGISTRY_DENYLIST` accept comma-separated hostname patterns such as `ghcr.io,*.docker.io`
 
 When explicit registry credentials are configured, Otter stores registry metadata in `./data/_registry/registries.json` and writes the credential blob separately with local encryption. For managed deployments, provide `OTTER_REGISTRY_SECRET_KEY` or `OTTER_REGISTRY_SECRET_KEY_FILE` so the encryption key is controlled outside the data directory.
+
+Otter now emits structured JSON-line audit records for scan queueing and completion, scan deletion, SBOM and VEX imports, and registry configuration changes. By default it appends them to `./data/_audit/events.jsonl`. Set `OTTER_AUDIT_OUTPUTS=stdout`, `stderr`, or a comma-separated mix such as `file,stdout` to forward them into your log pipeline; override the file path with `OTTER_AUDIT_FILE`, or disable audit output with `OTTER_AUDIT_ENABLED=false`.
 
 The background catalog worker is enabled by default and seeds the local catalog with common base images under the `catalog` org. Disable it with `OTTER_CATALOG_SCANNER_ENABLED=false` if you only want manual scans.
 

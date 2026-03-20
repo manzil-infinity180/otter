@@ -24,10 +24,32 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-03` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-04` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-04: audit events for scans, deletes, imports, and registry changes
+
+What changed:
+
+- added a new `pkg/audit` subsystem that emits structured JSON-line records with actor, org, target, action, outcome, timestamp, and metadata fields
+- enabled env-configured audit sinks via `OTTER_AUDIT_ENABLED`, `OTTER_AUDIT_OUTPUTS`, and `OTTER_AUDIT_FILE`; by default Otter now appends events to `data/_audit/events.jsonl`
+- wired audit emission into scan enqueue, synchronous scan completion, async catalog scan completion, scan deletion, SBOM import, VEX import, and registry configure flows
+- propagated actor identity into async scan requests so queue-driven completion events preserve the initiating user or scheduler identity instead of collapsing to an anonymous worker
+- added regression coverage for JSON-line audit recording, file-backed persistence, scheduler actor defaults, scan enqueue and completion events, import and delete events, and registry create events
+
+What was verified:
+
+- `go test ./pkg/audit ./pkg/api ./pkg/catalogscan`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- audit output is local-file backed by default, which is useful for single-node deployments, but operators using centralized logging should set `OTTER_AUDIT_OUTPUTS=file,stdout` or a similar forwarding configuration
+- audit emission is best-effort and intentionally does not fail the user-facing API path if the sink write fails; sink failures are logged through the server logger and should be monitored in production
 
 ### OTTER-AUDIT-03: registry egress allowlists and safer defaults
 

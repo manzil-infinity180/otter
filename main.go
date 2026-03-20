@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/otterXf/otter/pkg/api"
+	"github.com/otterXf/otter/pkg/audit"
 	"github.com/otterXf/otter/pkg/auth"
 	otteraws "github.com/otterXf/otter/pkg/aws"
 	"github.com/otterXf/otter/pkg/catalogscan"
@@ -64,8 +65,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("build registry manager: %v", err)
 	}
+	auditRecorder, err := buildAuditRecorder()
+	if err != nil {
+		log.Fatalf("build audit recorder: %v", err)
+	}
+	defer func() {
+		if err := auditRecorder.Close(); err != nil {
+			log.Printf("close audit recorder: %v", err)
+		}
+	}()
 	catalogScanConfig := catalogscan.ConfigFromEnv()
 	scanHandler := api.NewScanHandlerWithRegistry(store, sbomRepository, vulnerabilityRepository, analyzer, registryManager)
+	scanHandler.SetAuditRecorder(auditRecorder)
 	jobQueue := catalogscan.NewQueue(scanHandler, catalogScanConfig, log.Default())
 	jobQueue.Start(ctx)
 	catalogscan.NewScheduler(jobQueue, catalogScanConfig, log.Default()).Start(ctx)
@@ -204,4 +215,9 @@ func buildAuthenticator() (*auth.Authenticator, error) {
 		return nil, err
 	}
 	return auth.NewAuthenticator(cfg)
+}
+
+func buildAuditRecorder() (audit.Recorder, error) {
+	cfg := storage.ConfigFromEnv()
+	return audit.NewRecorder(audit.ConfigFromEnv(cfg.LocalDataDir))
 }

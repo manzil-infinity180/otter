@@ -34,6 +34,8 @@ type Request struct {
 	Registry  string `json:"registry,omitempty"`
 	Source    string `json:"source"`
 	Trigger   string `json:"trigger"`
+	Actor     string `json:"actor,omitempty"`
+	ActorType string `json:"actor_type,omitempty"`
 }
 
 type Result struct {

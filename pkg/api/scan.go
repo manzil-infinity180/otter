@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/otterXf/otter/pkg/attestation"
+	"github.com/otterXf/otter/pkg/audit"
 	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compare"
 	"github.com/otterXf/otter/pkg/compliance"
@@ -52,6 +53,7 @@ type ScanHandler struct {
 	compliance compliance.Assessor
 	registry   registry.Service
 	jobs       scanJobQueue
+	auditor    audit.Recorder
 }
 
 type scanJobQueue interface {
@@ -104,6 +106,7 @@ func NewScanHandlerWithRegistry(store storage.Store, sbomIndex sbomindex.Reposit
 		attestor:   attestation.NewDiscoverer(attestation.ConfigFromEnv()),
 		compliance: compliance.NewService(compliance.ConfigFromEnv()),
 		registry:   registryService,
+		auditor:    audit.NewNopRecorder(),
 	}
 }
 
@@ -127,6 +130,7 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 	}
 	payload.OrgID = orgID
 	payload.ImageID = imageID
+	actor := auditActorFromContext(c)
 
 	if payload.Async || strings.EqualFold(c.Query("async"), "true") {
 		request, err := catalogscan.NewRequest(payload.OrgID, payload.ImageID, payload.ImageName, payload.Registry, catalogscan.SourceAPI, catalogscan.TriggerManual)
@@ -134,6 +138,8 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		request.Actor = actor.ID
+		request.ActorType = actor.Type
 		if h.jobs == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan job queue is not configured"})
 			return
@@ -147,6 +153,23 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
+		h.recordAuditEvent(c.Request.Context(), audit.Event{
+			Action:     "scan.enqueued",
+			Outcome:    "queued",
+			Actor:      actor.ID,
+			ActorType:  actor.Type,
+			OrgID:      request.OrgID,
+			Target:     imageAuditTarget(request.OrgID, request.ImageID),
+			TargetType: "image",
+			Metadata: map[string]any{
+				"image_name": request.ImageName,
+				"registry":   request.Registry,
+				"job_id":     job.ID,
+				"mode":       "async",
+				"source":     request.Source,
+				"trigger":    request.Trigger,
+			},
+		})
 		c.JSON(http.StatusAccepted, gin.H{
 			"message":    "scan queued successfully",
 			"job":        job,
@@ -157,9 +180,46 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 
 	result, err := h.executeScan(c.Request.Context(), payload)
 	if err != nil {
+		h.recordAuditEvent(c.Request.Context(), audit.Event{
+			Action:     "scan.completed",
+			Outcome:    "failed",
+			Actor:      actor.ID,
+			ActorType:  actor.Type,
+			OrgID:      payload.OrgID,
+			Target:     imageAuditTarget(payload.OrgID, payload.ImageID),
+			TargetType: "image",
+			Error:      err.Error(),
+			Metadata: map[string]any{
+				"image_name": payload.ImageName,
+				"registry":   payload.Registry,
+				"mode":       "sync",
+				"source":     catalogscan.SourceAPI,
+				"trigger":    catalogscan.TriggerManual,
+			},
+		})
 		h.renderScanExecutionError(c, err)
 		return
 	}
+	h.recordAuditEvent(c.Request.Context(), audit.Event{
+		Action:     "scan.completed",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      result.OrgID,
+		Target:     imageAuditTarget(result.OrgID, result.ImageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"image_name":      result.ImageName,
+			"registry":        result.Registry,
+			"registry_auth":   result.RegistryAuth,
+			"storage_backend": result.StorageBackend,
+			"summary_total":   result.Summary.Total,
+			"scanners":        append([]string(nil), result.Scanners...),
+			"mode":            "sync",
+			"source":          catalogscan.SourceAPI,
+			"trigger":         catalogscan.TriggerManual,
+		},
+	})
 	c.JSON(http.StatusOK, result)
 }
 
@@ -191,6 +251,7 @@ func (h *ScanHandler) GetScanJob(c *gin.Context) {
 }
 
 func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Request) (catalogscan.Result, error) {
+	actor := auditActorFromRequest(req)
 	result, err := h.executeScan(ctx, ImageGeneratePayload{
 		ImageName: req.ImageName,
 		Registry:  req.Registry,
@@ -198,10 +259,27 @@ func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Re
 		ImageID:   req.ImageID,
 	})
 	if err != nil {
+		h.recordAuditEvent(ctx, audit.Event{
+			Action:     "scan.completed",
+			Outcome:    "failed",
+			Actor:      actor.ID,
+			ActorType:  actor.Type,
+			OrgID:      req.OrgID,
+			Target:     imageAuditTarget(req.OrgID, req.ImageID),
+			TargetType: "image",
+			Error:      err.Error(),
+			Metadata: map[string]any{
+				"image_name": req.ImageName,
+				"registry":   req.Registry,
+				"mode":       "async",
+				"source":     req.Source,
+				"trigger":    req.Trigger,
+			},
+		})
 		return catalogscan.Result{}, err
 	}
 
-	return catalogscan.Result{
+	catalogResult := catalogscan.Result{
 		OrgID:       result.OrgID,
 		ImageID:     result.ImageID,
 		ImageName:   result.ImageName,
@@ -209,7 +287,28 @@ func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Re
 		Scanners:    append([]string(nil), result.Scanners...),
 		Summary:     result.Summary,
 		CompletedAt: time.Now().UTC(),
-	}, nil
+	}
+	h.recordAuditEvent(ctx, audit.Event{
+		Action:     "scan.completed",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      catalogResult.OrgID,
+		Target:     imageAuditTarget(catalogResult.OrgID, catalogResult.ImageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"image_name":      catalogResult.ImageName,
+			"registry":        catalogResult.Registry,
+			"summary_total":   catalogResult.Summary.Total,
+			"scanners":        append([]string(nil), catalogResult.Scanners...),
+			"mode":            "async",
+			"source":          req.Source,
+			"trigger":         req.Trigger,
+			"storage_backend": h.store.Backend(),
+		},
+	})
+
+	return catalogResult, nil
 }
 
 func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayload) (ScanExecutionResult, error) {
@@ -508,6 +607,20 @@ func (h *ScanHandler) DeleteImageScansHandler(c *gin.Context) {
 		return
 	}
 
+	actor := auditActorFromContext(c)
+	h.recordAuditEvent(c.Request.Context(), audit.Event{
+		Action:     "scan.deleted",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      orgID,
+		Target:     imageAuditTarget(orgID, imageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"deleted_objects": len(objects),
+			"storage_backend": h.store.Backend(),
+		},
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"message":         "Scans deleted successfully",
 		"org_id":          orgID,
@@ -837,6 +950,24 @@ func (h *ScanHandler) ImportImageSBOM(c *gin.Context) {
 		return
 	}
 
+	actor := auditActorFromContext(c)
+	h.recordAuditEvent(c.Request.Context(), audit.Event{
+		Action:     "sbom.imported",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      orgID,
+		Target:     imageAuditTarget(orgID, imageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"format":           format,
+			"filename":         header.Filename,
+			"image_name":       imageName,
+			"package_count":    record.PackageCount,
+			"storage_backend":  h.store.Backend(),
+			"dependency_roots": append([]string(nil), record.DependencyRoots...),
+		},
+	})
 	c.JSON(http.StatusCreated, gin.H{
 		"message":          "SBOM imported successfully",
 		"org_id":           orgID,
@@ -1122,6 +1253,23 @@ func (h *ScanHandler) ImportImageVEX(c *gin.Context) {
 		return
 	}
 
+	actor := auditActorFromContext(c)
+	h.recordAuditEvent(c.Request.Context(), audit.Event{
+		Action:     "vex.imported",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      orgID,
+		Target:     imageAuditTarget(orgID, imageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"document_id":         vexDocument.DocumentID,
+			"filename":            header.Filename,
+			"image_name":          updatedRecord.ImageName,
+			"storage_backend":     h.store.Backend(),
+			"vulnerability_count": len(updatedRecord.Vulnerabilities),
+		},
+	})
 	c.JSON(http.StatusCreated, gin.H{
 		"message":             "VEX imported successfully",
 		"org_id":              orgID,

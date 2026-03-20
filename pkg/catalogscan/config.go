@@ -89,6 +89,8 @@ func DefaultRequests(cfg Config) []Request {
 		if err != nil {
 			continue
 		}
+		request.Actor = "catalog-scheduler"
+		request.ActorType = "system"
 		requests = append(requests, request)
 	}
 	return requests
