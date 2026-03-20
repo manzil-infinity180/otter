@@ -154,7 +154,7 @@ export function ImageDetailPage() {
             <p className="max-w-3xl text-base text-ink-600 dark:text-ink-300">{overview.image_name}</p>
             <div className="flex flex-wrap gap-2">
               {overview.tag ? <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">tag {overview.tag}</span> : null}
-              {overview.scanners.map((scanner) => (
+              {(overview.scanners ?? []).map((scanner) => (
                 <span key={scanner} className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/70 dark:text-sky-200">
                   {scanner}
                 </span>
@@ -718,13 +718,13 @@ export function ImageDetailPage() {
                 <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
                   <h3 className="font-display text-xl text-ink-900 dark:text-white">VEX documents</h3>
                   <div className="mt-4 space-y-3">
-                    {vulnerabilitiesQuery.data?.vex_documents.map((document) => (
+                    {(vulnerabilitiesQuery.data?.vex_documents ?? []).map((document) => (
                       <div key={document.document_id} className="rounded-2xl border border-ink-200 p-4 dark:border-ink-800">
                         <p className="font-medium text-ink-900 dark:text-white">{document.filename || document.document_id}</p>
                         <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">{document.author || "Unknown author"} · version {document.version}</p>
                       </div>
                     ))}
-                    {!vulnerabilitiesQuery.data?.vex_documents.length ? (
+                    {!(vulnerabilitiesQuery.data?.vex_documents ?? []).length ? (
                       <p className="text-sm text-ink-500 dark:text-ink-400">No VEX documents are stored for this image.</p>
                     ) : null}
                   </div>

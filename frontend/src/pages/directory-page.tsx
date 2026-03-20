@@ -54,8 +54,8 @@ export function DirectoryPage() {
       (accumulator, item) => {
         accumulator.images += 1;
         accumulator.packages += item.package_count;
-        accumulator.vulnerabilities += item.vulnerability_summary.total;
-        accumulator.critical += item.vulnerability_summary.by_severity.CRITICAL ?? 0;
+        accumulator.vulnerabilities += item.vulnerability_summary?.total ?? 0;
+        accumulator.critical += item.vulnerability_summary?.by_severity?.CRITICAL ?? 0;
         return accumulator;
       },
       { images: 0, packages: 0, vulnerabilities: 0, critical: 0 }
@@ -179,7 +179,7 @@ export function DirectoryPage() {
 
             <div className="mt-5 flex flex-wrap gap-2">
               {item.tag ? <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">tag {item.tag}</span> : null}
-              {item.scanners.map((scanner) => (
+              {(item.scanners ?? []).map((scanner) => (
                 <span key={scanner} className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/70 dark:text-sky-200">
                   {scanner}
                 </span>
@@ -188,7 +188,7 @@ export function DirectoryPage() {
 
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
               <StatCard label="Packages" value={item.package_count} />
-              <StatCard label="Vulnerabilities" value={item.vulnerability_summary.total} />
+              <StatCard label="Vulnerabilities" value={item.vulnerability_summary?.total ?? 0} />
               <StatCard label="Org / ID" value={item.org_id} detail={item.image_id} />
             </div>
 

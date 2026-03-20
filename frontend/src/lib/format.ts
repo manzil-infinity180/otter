@@ -62,7 +62,10 @@ export function complianceTone(status: ComplianceStatus) {
   }
 }
 
-export function vulnerabilityChips(summary: VulnerabilitySummary) {
+export function vulnerabilityChips(summary?: VulnerabilitySummary) {
+  if (!summary) {
+    return [];
+  }
   return severityOrder
     .map((severity) => ({ severity, count: summary.by_severity?.[severity] ?? 0 }))
     .filter((entry) => entry.count > 0);
