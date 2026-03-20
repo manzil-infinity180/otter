@@ -105,16 +105,26 @@ func TestAnalyzerAnalyzeBuildsCombinedResult(t *testing.T) {
 	}
 }
 
-func TestAnalyzerAnalyzeReturnsScannerError(t *testing.T) {
+func TestAnalyzerAnalyzeContinuesWhenScannerUnavailable(t *testing.T) {
 	t.Parallel()
 
 	analyzer := NewAnalyzer(
 		stubSBOMGenerator{document: []byte(`{}`), sbom: analyzerTestSBOM()},
-		stubVulnerabilityScanner{name: "grype", err: errors.New("database unavailable")},
+		stubVulnerabilityScanner{name: "grype", err: NewScannerUnavailableError("grype", "Grype database is unavailable", errors.New("database unavailable"))},
 	)
 
-	if _, err := analyzer.Analyze(context.Background(), "alpine:latest"); err == nil || !strings.Contains(err.Error(), "grype scan") {
-		t.Fatalf("Analyze() error = %v, want scanner context", err)
+	result, err := analyzer.Analyze(context.Background(), "alpine:latest")
+	if err != nil {
+		t.Fatalf("Analyze() error = %v", err)
+	}
+	if got, want := len(result.ScannerReports), 1; got != want {
+		t.Fatalf("len(result.ScannerReports) = %d, want %d", got, want)
+	}
+	if got, want := result.ScannerReports[0].Status, ScannerStatusUnavailable; got != want {
+		t.Fatalf("result.ScannerReports[0].Status = %q, want %q", got, want)
+	}
+	if got := result.Summary.Total; got != 0 {
+		t.Fatalf("result.Summary.Total = %d, want 0", got)
 	}
 }
 

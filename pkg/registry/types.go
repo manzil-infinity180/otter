@@ -67,6 +67,7 @@ type Service interface {
 	Configure(context.Context, ConfigureRequest) (ConfigureResult, error)
 	List(context.Context) ([]Summary, error)
 	PrepareImage(context.Context, string) (ImageAccess, error)
+	ListRepositoryTags(context.Context, string) ([]string, error)
 }
 
 type Repository interface {

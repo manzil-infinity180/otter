@@ -41,7 +41,14 @@ func (a *Analyzer) Analyze(ctx context.Context, imageRef string) (AnalysisResult
 		group.Go(func() error {
 			report, err := scanner.Scan(groupCtx, imageRef, sbomData)
 			if err != nil {
+				if IsScannerUnavailable(err) {
+					reports[idx] = NewUnavailableScannerReport(scanner.Name(), ScannerErrorMessage(err))
+					return nil
+				}
 				return fmt.Errorf("%s scan: %w", scanner.Name(), err)
+			}
+			if report.Status == "" {
+				report.Status = ScannerStatusCompleted
 			}
 			reports[idx] = report
 			return nil

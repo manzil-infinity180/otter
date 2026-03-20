@@ -26,6 +26,8 @@ type stubRegistryService struct {
 	listErr         error
 	access          registry.ImageAccess
 	accessErr       error
+	tagList         []string
+	tagErr          error
 }
 
 func (s stubRegistryService) Configure(context.Context, registry.ConfigureRequest) (registry.ConfigureResult, error) {
@@ -38,6 +40,10 @@ func (s stubRegistryService) List(context.Context) ([]registry.Summary, error) {
 
 func (s stubRegistryService) PrepareImage(context.Context, string) (registry.ImageAccess, error) {
 	return s.access, s.accessErr
+}
+
+func (s stubRegistryService) ListRepositoryTags(context.Context, string) ([]string, error) {
+	return s.tagList, s.tagErr
 }
 
 type contextCheckingAnalyzer struct {

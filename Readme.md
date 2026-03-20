@@ -1,24 +1,110 @@
-# otter
-An open-source SBOM & vulnerability analyzer.
-It scans container images generates CycloneDX SBOMs, lists vulnerabilities
+# Otter
 
-For the project-level implementation summary and future-agent handoff, see
-`AGENT_PROCESS.md`.
+Otter is an open-source SBOM and vulnerability analyzer for container images.
 
+It scans container images, generates CycloneDX and SPDX SBOMs, merges vulnerability findings from Grype and Trivy, stores scan artifacts, and exposes a React UI plus REST APIs for review, export, compliance posture, attestations, advisories, and comparisons.
 
+For a deeper architecture walkthrough, see [docs/architecture.md](docs/architecture.md) and [docs/api.md](docs/api.md).
 
-https://github.com/user-attachments/assets/60a8e2e2-3fb9-4687-979f-f980c1fbcac2
+Tutorials:
 
-## Storage backends
+- [docs/tutorial-otter-supply-chain-walkthrough.md](docs/tutorial-otter-supply-chain-walkthrough.md)
+- [docs/tutorial-baseline-vs-hardened.md](docs/tutorial-baseline-vs-hardened.md)
+- [docs/issues/README.md](docs/issues/README.md)
 
-Otter now runs locally by default.
+## Current architecture
 
-- `OTTER_STORAGE=local`: stores scan artifacts in `./data/`
-- `OTTER_STORAGE=postgres`: stores scan artifacts in PostgreSQL with migrations from `db/migrations/`
-- `OTTER_STORAGE=s3`: keeps S3 available as an optional backend
+### Backend
 
-Useful environment variables:
+- `main.go` initializes storage, the SBOM and vulnerability repositories, the analyzer pipeline, the registry manager, the background catalog worker, and the Gin router.
+- `pkg/api/` contains HTTP handlers. `ScanHandler` is the main orchestration point for scan, catalog, image detail, comparison, export, compliance, attestation, and registry endpoints.
+- `pkg/scan/` runs Syft for SBOM generation and Grype plus optional Trivy for vulnerability scanning.
+- `pkg/storage/` persists artifacts across local filesystem, PostgreSQL, or S3.
+- `pkg/sbomindex/` and `pkg/vulnindex/` normalize queryable image-level records for the UI and APIs.
+- `pkg/attestation/` and `pkg/compliance/` evaluate OCI referrers, provenance, signatures, and OpenSSF Scorecard signals.
+- `pkg/catalogscan/` provides async jobs and the seeded background catalog scanner.
 
+### Frontend
+
+- `frontend/src/App.tsx` defines the SPA shell and routes.
+- `frontend/src/pages/landing-page.tsx` is the landing page.
+- `frontend/src/pages/directory-page.tsx` is the scan intake and catalog browsing view.
+- `frontend/src/pages/image-detail-page.tsx` is the tabbed detail view for overview, tags, comparison, vulnerabilities, SBOM, attestations, and advisories.
+- `frontend/src/pages/docs-page.tsx` documents the current architecture and usage in-app.
+- `frontend/src/lib/api.ts` and `frontend/src/lib/types.ts` define the frontend contract with the Go backend.
+
+## Main flow
+
+1. A user scans an image from the UI or sends `POST /api/v1/scans`.
+2. Otter performs registry preflight and resolves credentials or anonymous public access.
+3. Syft generates CycloneDX and SPDX SBOMs.
+4. Grype and optional Trivy run in parallel to produce vulnerability findings.
+5. Otter merges findings into a combined report and stores all artifacts.
+6. The SBOM and vulnerability indexes are updated for image-level APIs and UI tabs.
+7. The image detail page becomes available for review, export, comparison, compliance, and attestation discovery.
+
+## What Otter supports
+
+- Public image scanning from the UI and API
+- Async scan jobs with polling via `GET /api/v1/scan-jobs/:id`
+- Seeded background catalog scans
+- Local filesystem, PostgreSQL, and S3 storage modes
+- CycloneDX and SPDX SBOM generation
+- Grype and Trivy vulnerability scanning
+- OpenVEX import and advisory-aware vulnerability status
+- OCI signature and attestation discovery
+- OpenSSF Scorecard and supply-chain posture checks
+- Image comparison plus CycloneDX, SPDX, JSON, CSV, and SARIF exports
+- React UI and HTML fallback browsing mode
+
+## Run locally
+
+### Backend
+
+```bash
+OTTER_STORAGE=local go run .
+```
+
+This starts the API on `http://localhost:7789`.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+This starts the Vite dev server on `http://localhost:4173` and proxies API calls to the Go backend.
+
+### Optional Trivy server
+
+```bash
+trivy server --listen 0.0.0.0:4954
+OTTER_STORAGE=local OTTER_TRIVY_ENABLED=true OTTER_TRIVY_SERVER_URL=http://localhost:4954 go run .
+```
+
+### Full stack with Docker Compose
+
+```bash
+docker compose up --build
+```
+
+## Typical local workflow
+
+1. Start the backend with `OTTER_STORAGE=local go run .`
+2. Start the frontend with `cd frontend && npm run dev`
+3. Open `http://localhost:4173`
+4. Use the landing page to jump into the directory or docs
+5. Scan a public image such as `nginx:latest`
+6. Wait for the async scan job to finish
+7. Open the image detail page and inspect the tabs
+
+## Environment variables
+
+Common variables:
+
+- `OTTER_STORAGE`
 - `OTTER_DATA_DIR`
 - `OTTER_DOCKER_CONFIG_PATH`
 - `OTTER_REGISTRY_HEALTHCHECK_TIMEOUT`
@@ -44,144 +130,45 @@ Useful environment variables:
 - `OTTER_CATALOG_SCANNER_JOB_HISTORY_LIMIT`
 - `OTTER_CATALOG_SCANNER_ORG_ID`
 - `OTTER_CATALOG_SCANNER_IMAGES`
-- `S3_BUCKET_NAME`
-- `AWS_REGION`
-
-## Local development
-
-Run with local storage:
-
-```bash
-OTTER_STORAGE=local go run .
-```
-
-Configure a registry for authenticated pulls:
-
-```bash
-curl -X POST http://localhost:7789/api/v1/registries \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "registry": "ghcr.io",
-    "auth_mode": "docker_config",
-    "docker_config_path": "'"$HOME"'/.docker/config.json"
-  }'
-```
-
-Otter uses configured registry settings to preflight image access before each scan and throttles registry API pulls per host. If no explicit registry configuration exists, public images still fall back to the default Docker keychain behavior.
-
-The background catalog worker is enabled by default and seeds the local catalog with common base images under the `catalog` org. Disable it with `OTTER_CATALOG_SCANNER_ENABLED=false` if you only want manual scans.
-
-Build and test the React frontend:
-
-```bash
-cd frontend
-npm install
-npm test
-npm run build
-```
-
-When `frontend/dist` exists, Otter serves the React UI at `/` with the image detail route at `/images/:org_id/:image_id`. Without the built bundle, Otter redirects `/` to the basic HTML browse mode at `/browse`.
-
-Run with PostgreSQL via Docker Compose:
-
-```bash
-docker compose up --build
-```
-
-Run with local storage plus a local Trivy server:
-
-```bash
-trivy server --listen 0.0.0.0:4954
-OTTER_STORAGE=local OTTER_TRIVY_ENABLED=true OTTER_TRIVY_SERVER_URL=http://localhost:4954 go run .
-```
-
-Successful scans now store:
-
-- `sbom.json`
-- `vulnerabilities.json` (combined Grype + Trivy report)
-- `grype-vulnerabilities.json`
-- `trivy-vulnerabilities.json`
-
-Otter also indexes vulnerability findings for image-level APIs:
-
-- `GET /api/v1/images/:id/vulnerabilities?org_id=default_org`
-- optional `severity=critical|high|medium|low|negligible`
-- optional `status=affected|not_affected|fixed|under_investigation`
-- `GET /api/v1/images/:id/compliance?org_id=default_org`
-- `GET /api/v1/images/:id/attestations?org_id=default_org`
-- OpenVEX import via `POST /api/v1/images/:id/vex?org_id=default_org`
-
-The vulnerability response includes:
-
-- full finding records with CVSS, fix versions, scanner attribution, and advisory status
-- summary counts by severity, scanner, and advisory status
-- fix recommendations grouped by affected package
-- trend snapshots preserved across re-scans
-
-The attestation response includes:
-
-- signatures discovered through OCI referrers plus `cosign verify` status
-- in-toto and DSSE attestations with parsed SLSA provenance summaries
-- signer, issuer, timestamp, predicate type, and statement subjects when present
-
-The compliance response includes:
-
-- SLSA provenance level detection derived from stored provenance evidence
-- OpenSSF Scorecard lookups for detected GitHub source repositories
-- a standards checklist for SLSA, NIST SSDF, and CIS Container Image guidance
-- best-effort evidence errors when registry attestation discovery or Scorecard lookups are unavailable
-
-Scorecard integration is enabled by default and can be tuned with:
-
 - `OTTER_SCORECARD_ENABLED`
 - `OTTER_SCORECARD_BASE_URL`
 - `OTTER_SCORECARD_TIMEOUT`
 - `OTTER_SCORECARD_SHOW_DETAILS`
+- `S3_BUCKET_NAME`
+- `AWS_REGION`
 
-## Automated catalog scanning
+## Useful commands
 
-Otter now includes a local-first catalog scan pipeline backed by an in-process worker queue.
-
-- The worker accepts async scan requests via `POST /api/v1/scans` with `"async": true`.
-- Job status is available at `GET /api/v1/scan-jobs/:id`.
-- A scheduler enqueues a default image set on boot and then repeats on `OTTER_CATALOG_SCANNER_INTERVAL`.
-- Re-scans reuse stable `org_id` and `image_id` values, so vulnerability trend snapshots continue to build over time.
-
-Default seeded image refs:
-
-- `alpine:latest`
-- `alpine:3.19`
-- `debian:latest`
-- `debian:12-slim`
-- `ubuntu:latest`
-- `ubuntu:24.04`
-- `nginx:latest`
-- `nginx:1.27`
-- `python:latest`
-- `python:3.12`
-- `golang:latest`
-- `golang:1.24`
-- `cgr.dev/chainguard/static:latest`
-
-Override the catalog list with a comma-separated value:
+### Backend
 
 ```bash
-OTTER_CATALOG_SCANNER_IMAGES="alpine:latest,nginx:latest,cgr.dev/chainguard/static:latest" go run .
+make build
+make lint
+go test ./...
+go vet ./...
 ```
 
-Export formats are available from the image detail UI and the REST API:
+### Frontend
 
-- `GET /api/v1/images/:id/export?org_id=...&format=cyclonedx|spdx|json|csv|sarif`
-- `GET /api/v1/comparisons/:id/export`
+```bash
+cd frontend && npm test
+cd frontend && npm run build
+```
 
+## API highlights
 
+- `POST /api/v1/scans`
+- `GET /api/v1/scan-jobs/:id`
+- `GET /api/v1/catalog`
+- `GET /api/v1/images/:id/overview`
+- `GET /api/v1/images/:id/tags`
+- `GET /api/v1/images/:id/vulnerabilities`
+- `GET /api/v1/images/:id/sbom`
+- `GET /api/v1/images/:id/attestations`
+- `GET /api/v1/images/:id/compliance`
+- `POST /api/v1/images/:id/vex`
+- `GET /api/v1/images/:id/export`
+- `GET /api/v1/compare`
+- `GET /browse`
 
-1. Task: Setting up trivy server (dockerfile/docker compose) and scan the image (look also for the case)
-2. Task: Setting up the postresql and how to store the sbom or other things (read it and store)
-3. Task: github action to build everything on main branch pr merged
-4. Task: Save different things like sbom, vex, provenances, cve (with the fixes details)
-5. Task: add the open source project scan (+ task 4)
-6. Task: add integration for different oci registry like ghrc, docker private (i mean for pvt)
-7. Task: Minimal UI + export option (different view or render options)
----
-8. Look for the attestation if possible or for the compilances ?
+See [docs/api.md](docs/api.md) for the complete API behavior.

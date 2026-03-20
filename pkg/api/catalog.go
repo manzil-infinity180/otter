@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,32 @@ type ImageOverview struct {
 	DependencyRoots []string          `json:"dependency_roots,omitempty"`
 	Files           []ObjectResponse  `json:"files"`
 	Tags            []ImageTagSummary `json:"tags"`
+}
+
+type ImageRepositoryTag struct {
+	Tag                  string            `json:"tag,omitempty"`
+	Digest               string            `json:"digest,omitempty"`
+	Scanned              bool              `json:"scanned"`
+	Current              bool              `json:"current"`
+	OrgID                string            `json:"org_id,omitempty"`
+	ImageID              string            `json:"image_id,omitempty"`
+	ImageName            string            `json:"image_name,omitempty"`
+	UpdatedAt            time.Time         `json:"updated_at,omitempty"`
+	VulnerabilitySummary vulnindex.Summary `json:"vulnerability_summary,omitempty"`
+}
+
+type ImageTagsResponse struct {
+	OrgID          string               `json:"org_id"`
+	ImageID        string               `json:"image_id"`
+	ImageName      string               `json:"image_name"`
+	Repository     string               `json:"repository"`
+	StorageBackend string               `json:"storage_backend"`
+	Query          string               `json:"query,omitempty"`
+	Page           int                  `json:"page"`
+	PageSize       int                  `json:"page_size"`
+	Total          int                  `json:"total"`
+	Items          []ImageRepositoryTag `json:"items"`
+	RemoteTagError string               `json:"remote_tag_error,omitempty"`
 }
 
 type catalogFilters struct {
@@ -115,6 +142,33 @@ func (h *ScanHandler) GetImageOverview(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, overview)
+}
+
+func (h *ScanHandler) GetImageTags(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	page, pageSize, err := parsePaginationParams(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	response, err := h.buildImageTagsResponse(c.Request.Context(), orgID, imageID, strings.TrimSpace(c.Query("query")), page, pageSize)
+	if err != nil {
+		switch {
+		case errors.Is(err, sbomindex.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "image tags not found"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load image tags: %v", err)})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *ScanHandler) BrowseCatalog(c *gin.Context) {
@@ -372,6 +426,246 @@ func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID str
 		Files:             files,
 		Tags:              tags,
 	}, nil
+}
+
+func (h *ScanHandler) buildImageTagsResponse(ctx context.Context, orgID, imageID, query string, page, pageSize int) (ImageTagsResponse, error) {
+	overview, err := h.buildImageOverview(ctx, orgID, imageID)
+	if err != nil {
+		return ImageTagsResponse{}, err
+	}
+
+	remoteTags, remoteTagError := h.buildRemoteTags(ctx, overview.ImageName, allStoredTags(orgID, imageID, overview.ImageName, overview.Tags))
+	items := buildImageTagItems(overview, remoteTags)
+	if query != "" {
+		filtered := items[:0]
+		needle := strings.ToLower(query)
+		for _, item := range items {
+			if strings.Contains(strings.ToLower(item.Tag), needle) || strings.Contains(strings.ToLower(item.ImageName), needle) || strings.Contains(strings.ToLower(item.Digest), needle) {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+
+	start := (page - 1) * pageSize
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+
+	return ImageTagsResponse{
+		OrgID:          overview.OrgID,
+		ImageID:        overview.ImageID,
+		ImageName:      overview.ImageName,
+		Repository:     overview.Repository,
+		StorageBackend: overview.StorageBackend,
+		Query:          query,
+		Page:           page,
+		PageSize:       pageSize,
+		Total:          len(items),
+		Items:          items[start:end],
+		RemoteTagError: remoteTagError,
+	}, nil
+}
+
+type repositoryTagLister interface {
+	ListRepositoryTags(context.Context, string) ([]string, error)
+}
+
+type imageRemoteTag struct {
+	Tag     string
+	Scanned bool
+	OrgID   string
+	ImageID string
+}
+
+func (h *ScanHandler) buildRemoteTags(ctx context.Context, imageName string, scanned map[string]imageRemoteTag) ([]imageRemoteTag, string) {
+	lister, ok := h.registry.(repositoryTagLister)
+	if !ok {
+		return nil, ""
+	}
+
+	tagCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	tags, err := lister.ListRepositoryTags(tagCtx, imageName)
+	if err != nil {
+		return nil, err.Error()
+	}
+	if len(tags) == 0 {
+		return nil, ""
+	}
+
+	result := make([]imageRemoteTag, 0, len(tags))
+	for _, tag := range tags {
+		if stored, ok := scanned[tag]; ok {
+			result = append(result, stored)
+			continue
+		}
+		result = append(result, imageRemoteTag{Tag: tag})
+	}
+	return result, ""
+}
+
+func allStoredTags(orgID, imageID, imageName string, tags []ImageTagSummary) map[string]imageRemoteTag {
+	result := make(map[string]imageRemoteTag, len(tags)+1)
+
+	currentRef := parseImageReference(imageName)
+	if currentRef.Tag != "" {
+		result[currentRef.Tag] = imageRemoteTag{
+			Tag:     currentRef.Tag,
+			Scanned: true,
+			OrgID:   orgID,
+			ImageID: imageID,
+		}
+	}
+
+	for _, tag := range tags {
+		if tag.Tag == "" {
+			continue
+		}
+		result[tag.Tag] = imageRemoteTag{
+			Tag:     tag.Tag,
+			Scanned: true,
+			OrgID:   tag.OrgID,
+			ImageID: tag.ImageID,
+		}
+	}
+
+	return result
+}
+
+func buildImageTagItems(overview ImageOverview, remoteTags []imageRemoteTag) []ImageRepositoryTag {
+	items := make([]ImageRepositoryTag, 0, len(overview.Tags)+len(remoteTags)+1)
+	index := make(map[string]int, len(overview.Tags)+len(remoteTags)+1)
+
+	add := func(item ImageRepositoryTag) {
+		key := item.Tag
+		if key == "" {
+			key = item.Digest
+		}
+		if key == "" {
+			return
+		}
+		if existingIndex, ok := index[key]; ok {
+			if item.Scanned {
+				existing := items[existingIndex]
+				if !item.Current {
+					item.Current = existing.Current
+				}
+				if item.OrgID == "" {
+					item.OrgID = existing.OrgID
+				}
+				if item.ImageID == "" {
+					item.ImageID = existing.ImageID
+				}
+				if item.ImageName == "" {
+					item.ImageName = existing.ImageName
+				}
+				if item.UpdatedAt.IsZero() {
+					item.UpdatedAt = existing.UpdatedAt
+				}
+				if item.VulnerabilitySummary.Total == 0 && len(item.VulnerabilitySummary.BySeverity) == 0 && len(item.VulnerabilitySummary.ByScanner) == 0 && len(item.VulnerabilitySummary.ByStatus) == 0 {
+					item.VulnerabilitySummary = existing.VulnerabilitySummary
+				}
+				items[existingIndex] = item
+			}
+			return
+		}
+		index[key] = len(items)
+		items = append(items, item)
+	}
+
+	add(ImageRepositoryTag{
+		Tag:                  overview.Tag,
+		Digest:               overview.Digest,
+		Scanned:              true,
+		Current:              true,
+		OrgID:                overview.OrgID,
+		ImageID:              overview.ImageID,
+		ImageName:            overview.ImageName,
+		UpdatedAt:            overview.UpdatedAt,
+		VulnerabilitySummary: overview.VulnerabilitySummary,
+	})
+
+	for _, tag := range overview.Tags {
+		add(ImageRepositoryTag{
+			Tag:                  tag.Tag,
+			Digest:               tag.Digest,
+			Scanned:              true,
+			OrgID:                tag.OrgID,
+			ImageID:              tag.ImageID,
+			ImageName:            tag.ImageName,
+			UpdatedAt:            tag.UpdatedAt,
+			VulnerabilitySummary: tag.VulnerabilitySummary,
+		})
+	}
+
+	for _, remoteTag := range remoteTags {
+		add(ImageRepositoryTag{
+			Tag:       remoteTag.Tag,
+			Scanned:   remoteTag.Scanned,
+			OrgID:     remoteTag.OrgID,
+			ImageID:   remoteTag.ImageID,
+			ImageName: buildTaggedImageName(overview.Repository, overview.RepositoryPath, remoteTag.Tag),
+		})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+
+		if left.Current != right.Current {
+			return left.Current
+		}
+		if left.Scanned != right.Scanned {
+			return left.Scanned
+		}
+		if !left.UpdatedAt.Equal(right.UpdatedAt) {
+			return left.UpdatedAt.After(right.UpdatedAt)
+		}
+		return left.Tag < right.Tag
+	})
+
+	return items
+}
+
+func buildTaggedImageName(repository, repositoryPath, tag string) string {
+	base := strings.TrimSpace(repository)
+	if base == "" {
+		base = strings.TrimSpace(repositoryPath)
+	}
+	if base == "" || tag == "" {
+		return base
+	}
+	base = strings.TrimSuffix(base, ":")
+	return base + ":" + tag
+}
+
+func parsePaginationParams(c *gin.Context) (int, int, error) {
+	page := 1
+	pageSize := 25
+
+	if raw := strings.TrimSpace(c.Query("page")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			return 0, 0, fmt.Errorf("page must be a positive integer")
+		}
+		page = parsed
+	}
+
+	if raw := strings.TrimSpace(c.Query("page_size")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return 0, 0, fmt.Errorf("page_size must be between 1 and 100")
+		}
+		pageSize = parsed
+	}
+
+	return page, pageSize, nil
 }
 
 func matchesCatalogFilters(entry ImageCatalogEntry, filters catalogFilters) bool {

@@ -123,6 +123,47 @@ func (m *Manager) PrepareImage(ctx context.Context, imageRef string) (ImageAcces
 	}, nil
 }
 
+func (m *Manager) ListRepositoryTags(ctx context.Context, imageRef string) ([]string, error) {
+	if !m.cfg.EnableTagListing {
+		return nil, nil
+	}
+
+	ref, err := name.ParseReference(strings.TrimSpace(imageRef))
+	if err != nil {
+		return nil, fmt.Errorf("parse image reference: %w", err)
+	}
+
+	record, err := m.recordForRegistry(ctx, ref.Context().RegistryStr())
+	if err != nil {
+		return nil, err
+	}
+
+	registryOptions, _, err := m.registryOptions(record)
+	if err != nil {
+		return nil, err
+	}
+
+	registryName := canonicalRegistry(record.Registry)
+	if registryName == "" {
+		registryName = canonicalRegistry(ref.Context().RegistryStr())
+	}
+	if err := m.limiter.Wait(ctx, registryName); err != nil {
+		return nil, fmt.Errorf("wait for registry rate limit: %w", err)
+	}
+
+	options, err := remoteOptions(ctx, ref, registryOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	tags, err := v1remote.List(ref.Context(), options...)
+	if err != nil {
+		return nil, fmt.Errorf("list repository tags: %w", err)
+	}
+	sort.Strings(tags)
+	return tags, nil
+}
+
 func (m *Manager) recordForRegistry(ctx context.Context, registryName string) (Record, error) {
 	registryName = canonicalRegistry(registryName)
 	record, err := m.repo.Get(ctx, registryName)

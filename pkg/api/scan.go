@@ -315,16 +315,21 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		if err != nil {
 			return ScanExecutionResult{}, err
 		}
+		metadata := map[string]string{
+			"artifact":   "vulnerabilities",
+			"scanner":    report.Scanner,
+			"image_name": payload.ImageName,
+			"status":     report.Status,
+		}
+		if strings.TrimSpace(report.Message) != "" {
+			metadata["message"] = report.Message
+		}
 		uploads = append(uploads, artifactUpload{
 			ResponseName: scannerResponseKey(report.Scanner),
 			Key:          key,
 			Data:         report.Document,
 			ContentType:  report.ContentType,
-			Metadata: map[string]string{
-				"artifact":   "vulnerabilities",
-				"scanner":    report.Scanner,
-				"image_name": payload.ImageName,
-			},
+			Metadata:     metadata,
 		})
 	}
 
@@ -374,6 +379,9 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 
 	scanners := make([]string, 0, len(result.ScannerReports))
 	for _, report := range result.ScannerReports {
+		if report.Status == scan.ScannerStatusUnavailable {
+			continue
+		}
 		scanners = append(scanners, report.Scanner)
 	}
 

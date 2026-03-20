@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -37,13 +38,97 @@ type AnalysisResult struct {
 
 type ScannerReport struct {
 	Scanner     string                 `json:"scanner"`
+	Status      string                 `json:"status,omitempty"`
+	Message     string                 `json:"message,omitempty"`
 	ContentType string                 `json:"content_type"`
 	Document    []byte                 `json:"-"`
 	Findings    []VulnerabilityFinding `json:"findings"`
 }
 
+const (
+	ScannerStatusCompleted   = "completed"
+	ScannerStatusUnavailable = "unavailable"
+)
+
 func (r ScannerReport) Filename() string {
 	return fmt.Sprintf("%s-vulnerabilities.json", r.Scanner)
+}
+
+type ScannerExecutionError struct {
+	Scanner string
+	Kind    string
+	Message string
+	Err     error
+}
+
+func (e *ScannerExecutionError) Error() string {
+	switch {
+	case e == nil:
+		return ""
+	case e.Message != "":
+		return e.Message
+	case e.Err != nil:
+		return e.Err.Error()
+	default:
+		return fmt.Sprintf("%s scanner error", e.Scanner)
+	}
+}
+
+func (e *ScannerExecutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func NewScannerUnavailableError(scanner, message string, err error) error {
+	return &ScannerExecutionError{
+		Scanner: scanner,
+		Kind:    ScannerStatusUnavailable,
+		Message: strings.TrimSpace(message),
+		Err:     err,
+	}
+}
+
+func IsScannerUnavailable(err error) bool {
+	var executionError *ScannerExecutionError
+	return errors.As(err, &executionError) && executionError.Kind == ScannerStatusUnavailable
+}
+
+func ScannerErrorMessage(err error) string {
+	var executionError *ScannerExecutionError
+	if errors.As(err, &executionError) && strings.TrimSpace(executionError.Message) != "" {
+		return executionError.Message
+	}
+	if err == nil {
+		return ""
+	}
+	return strings.TrimSpace(err.Error())
+}
+
+func NewUnavailableScannerReport(scanner, message string) ScannerReport {
+	report := ScannerReport{
+		Scanner:     scanner,
+		Status:      ScannerStatusUnavailable,
+		Message:     strings.TrimSpace(message),
+		ContentType: "application/json",
+		Findings:    []VulnerabilityFinding{},
+	}
+	document, err := json.MarshalIndent(struct {
+		Scanner  string                 `json:"scanner"`
+		Status   string                 `json:"status"`
+		Message  string                 `json:"message,omitempty"`
+		Findings []VulnerabilityFinding `json:"findings"`
+	}{
+		Scanner:  report.Scanner,
+		Status:   report.Status,
+		Message:  report.Message,
+		Findings: report.Findings,
+	}, "", "  ")
+	if err == nil {
+		report.Document = document
+	}
+	return report
 }
 
 type CVSSScore struct {

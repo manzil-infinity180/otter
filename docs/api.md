@@ -181,6 +181,18 @@ Response includes:
 - available scan artifacts for download
 - related tags already stored for the same repository within the org
 
+## List image tags
+
+`GET /api/v1/images/:id/tags?org_id=default_org&page=1&page_size=25&query=3.19`
+
+Response includes:
+
+- the current tag plus other stored tags for the same repository
+- best-effort public registry tags when the registry exposes listing
+- pagination fields: `page`, `page_size`, and `total`
+- per-tag scan metadata so the UI can link stored scans or queue a new scan for an unscanned public tag
+- `remote_tag_error` when public registry listing fails but stored tags are still available
+
 ## Get image compliance
 
 `GET /api/v1/images/:id/compliance?org_id=default_org`

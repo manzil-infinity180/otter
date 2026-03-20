@@ -686,9 +686,12 @@ func TestGetImageOverviewReturnsTagsAndFiles(t *testing.T) {
 		t.Fatalf("store.Put() error = %v", err)
 	}
 
-	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
+	handler := NewScanHandlerWithRegistry(store, repo, vulnRepo, stubAnalyzer{}, stubRegistryService{
+		tagList: []string{"3.18", "3.19", "3.20"},
+	})
 	router := gin.New()
 	router.GET("/api/v1/images/:id/overview", handler.GetImageOverview)
+	router.GET("/api/v1/images/:id/tags", handler.GetImageTags)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/images/image-a/overview?org_id=demo-org", nil)
 	resp := httptest.NewRecorder()
@@ -710,6 +713,31 @@ func TestGetImageOverviewReturnsTagsAndFiles(t *testing.T) {
 	}
 	if got, want := payload.Tags[0].Tag, "3.20"; got != want {
 		t.Fatalf("payload.Tags[0].Tag = %q, want %q", got, want)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/images/image-a/tags?org_id=demo-org", nil)
+	resp = httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("tag status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var tagsPayload ImageTagsResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &tagsPayload); err != nil {
+		t.Fatalf("json.Unmarshal(tags) error = %v", err)
+	}
+	if got, want := tagsPayload.Total, 3; got != want {
+		t.Fatalf("tagsPayload.Total = %d, want %d", got, want)
+	}
+	if !tagsPayload.Items[0].Current || tagsPayload.Items[0].Tag != "3.19" {
+		t.Fatalf("tagsPayload.Items[0] = %#v, want current 3.19", tagsPayload.Items[0])
+	}
+	if got, want := tagsPayload.Items[1].Tag, "3.20"; got != want {
+		t.Fatalf("tagsPayload.Items[1].Tag = %q, want %q", got, want)
+	}
+	if tagsPayload.Items[2].Scanned {
+		t.Fatalf("tagsPayload.Items[2] = %#v, want unscanned remote tag", tagsPayload.Items[2])
 	}
 }
 

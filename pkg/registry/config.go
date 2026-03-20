@@ -13,6 +13,7 @@ type Config struct {
 	DefaultDockerConfig string
 	HealthcheckTimeout  time.Duration
 	MinPullInterval     time.Duration
+	EnableTagListing    bool
 }
 
 func ConfigFromEnv(dataDir string) Config {
@@ -44,5 +45,6 @@ func ConfigFromEnv(dataDir string) Config {
 		DefaultDockerConfig: defaultDockerConfig,
 		HealthcheckTimeout:  healthTimeout,
 		MinPullInterval:     minPullInterval,
+		EnableTagListing:    true,
 	}
 }
