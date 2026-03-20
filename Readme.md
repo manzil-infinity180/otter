@@ -24,6 +24,8 @@ Useful environment variables:
 - `OTTER_REGISTRY_HEALTHCHECK_TIMEOUT`
 - `OTTER_REGISTRY_PULL_INTERVAL`
 - `OTTER_REGISTRY_PULLS_PER_SECOND`
+- `OTTER_REGISTRY_SECRET_KEY`
+- `OTTER_REGISTRY_SECRET_KEY_FILE`
 - `OTTER_POSTGRES_DSN`
 - `OTTER_POSTGRES_MIGRATIONS`
 - `OTTER_TRIVY_ENABLED`
@@ -68,6 +70,8 @@ curl -X POST http://localhost:7789/api/v1/registries \
 ```
 
 Otter uses configured registry settings to preflight image access before each scan and throttles registry API pulls per host. If no explicit registry configuration exists, public images still fall back to the default Docker keychain behavior.
+
+When explicit registry credentials are configured, Otter stores registry metadata in `./data/_registry/registries.json` and writes the credential blob separately with local encryption. For managed deployments, provide `OTTER_REGISTRY_SECRET_KEY` or `OTTER_REGISTRY_SECRET_KEY_FILE` so the encryption key is controlled outside the data directory.
 
 The background catalog worker is enabled by default and seeds the local catalog with common base images under the `catalog` org. Disable it with `OTTER_CATALOG_SCANNER_ENABLED=false` if you only want manual scans.
 

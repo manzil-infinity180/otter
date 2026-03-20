@@ -24,10 +24,33 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit story `OTTER-AUDIT-01` is complete in this pass.
+- Audit stories `OTTER-AUDIT-01` and `OTTER-AUDIT-02` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-02: stop storing registry credentials in plaintext on disk
+
+What changed:
+
+- refactored `pkg/registry` local persistence so `registries.json` now stores only registry metadata plus a per-registry `secret_ref` marker instead of raw explicit credentials
+- added an encrypted local secret store under `pkg/registry` that writes one AES-GCM protected secret blob per registry, so secret rotation only rewrites that registry's secret file
+- kept the runtime `Record` contract intact by decrypting registry credentials on repository reads before health checks and scan preflight use them
+- added in-place compatibility migration for legacy plaintext `registries.json` entries so existing explicit credentials are moved into encrypted secret files and removed from metadata on first read/write
+- removed orphaned secret files when a registry switches from explicit credentials back to docker-config auth
+- added repository tests covering redaction, encrypted persistence, per-registry secret rotation isolation, and legacy plaintext migration
+
+What was verified:
+
+- `go test ./pkg/registry/...`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- operators can provide `OTTER_REGISTRY_SECRET_KEY` or `OTTER_REGISTRY_SECRET_KEY_FILE` to supply a stable 32-byte base64 or hex key; otherwise Otter auto-generates a local key file at `_registry/registry-secrets.key`
+- the auto-generated key file preserves backward compatibility for local installs, but managed deployments should inject the key through environment or a mounted file so secret storage can be rotated and controlled explicitly
 
 ### OTTER-AUDIT-01: authentication, authorization, and org isolation
 
