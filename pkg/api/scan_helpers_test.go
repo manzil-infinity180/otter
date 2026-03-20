@@ -76,7 +76,7 @@ func TestExecuteCatalogScanAndHelperFallbacks(t *testing.T) {
 			ImageRef:                "alpine:latest",
 			SBOMDocument:            []byte(testCycloneDXDocument),
 			SBOMSPDXDocument:        []byte(testSPDXDocument),
-			SBOMData:                testSyftSBOM(),
+			SBOMData:                testSyftSBOMForPlatform("linux/arm64"),
 			CombinedVulnerabilities: []byte(`{"matches":[]}`),
 			CombinedReport:          testCombinedVulnerabilityReport(),
 			Summary:                 scan.VulnerabilitySummary{Total: 1, Fixable: 1},
@@ -100,6 +100,9 @@ func TestExecuteCatalogScanAndHelperFallbacks(t *testing.T) {
 	}
 	if got, want := len(result.Scanners), 1; got != want {
 		t.Fatalf("len(Scanners) = %d, want %d", got, want)
+	}
+	if got, want := result.Platform, "linux/arm64"; got != want {
+		t.Fatalf("Platform = %q, want %q", got, want)
 	}
 
 	legacyKey, err := ArtifactKeyBuilder{OrgID: "catalog", ImageID: "legacy-image"}.BuildSBOMKey()

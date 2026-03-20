@@ -38,6 +38,7 @@ type Record struct {
 	OrgID           string                `json:"org_id"`
 	ImageID         string                `json:"image_id"`
 	ImageName       string                `json:"image_name,omitempty"`
+	Platform        string                `json:"platform,omitempty"`
 	SourceFormat    string                `json:"source_format"`
 	PackageCount    int                   `json:"package_count"`
 	Packages        []PackageRecord       `json:"packages"`

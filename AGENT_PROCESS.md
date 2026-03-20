@@ -24,10 +24,34 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-05` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-06` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-06: honor platform selection end to end for multi-arch scans
+
+What changed:
+
+- added explicit scan platform normalization so `platform` is accepted end to end and the existing `arch` field now acts as a backward-compatible alias that normalizes to `linux/<arch>`
+- threaded the selected platform through synchronous scans, async scan jobs, and catalog worker execution, then applied it to the Syft source configuration so requested platforms influence manifest resolution for multi-arch images
+- captured the resolved platform from Syft image metadata and persisted it on stored artifacts plus structured SBOM and vulnerability index records across local and PostgreSQL backends, including a new migration for index platform columns
+- exposed stored platform metadata in scan responses, job payloads, catalog and overview APIs, no-JavaScript browse pages, and the React image detail view and tag table
+- added regression coverage for async platform propagation, analyze-context platform selection, persisted platform metadata, overview/tag platform rendering, PostgreSQL round-tripping, and frontend display
+
+What was verified:
+
+- `go test ./pkg/api ./pkg/scan ./pkg/sbomindex ./pkg/vulnindex ./pkg/catalogscan`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+- `cd frontend && npm test`
+- `cd frontend && npm run build`
+
+Follow-up and rollout notes:
+
+- imported SBOM or vulnerability documents that were never scanned still have no platform metadata unless operators re-scan them or enrich those records separately
+- `platform` is now the preferred request field for scans; `arch` remains supported for compatibility, but future clients should send full OCI platform strings when they need variant-aware selection
 
 ### OTTER-AUDIT-05: persist artifact metadata across local, PostgreSQL, and S3 backends
 

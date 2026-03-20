@@ -50,6 +50,7 @@ Request body:
 ```json
 {
   "arch": "amd64",
+  "platform": "linux/amd64",
   "image_name": "alpine:latest",
   "registry": "index.docker.io",
   "org_id": "default_org",
@@ -63,6 +64,7 @@ Behavior:
 - Generates a CycloneDX SBOM and SPDX SBOM.
 - Runs configured vulnerability scanners.
 - Performs a registry preflight check with configured auth before Syft pulls the image.
+- Honors `platform` during multi-arch image resolution. `arch` remains supported as a legacy alias and normalizes to `linux/<arch>`.
 - Applies per-registry pull throttling before registry API access.
 - Stores:
   - `sbom.json` as the legacy CycloneDX alias
@@ -85,9 +87,9 @@ Async mode:
 Returns the current job state for an async scan request, including:
 
 - pending, running, succeeded, or failed status
-- original scan request payload
+- original scan request payload with the normalized `platform` when provided
 - completion timestamps
-- vulnerability summary and scanner list when the job succeeds
+- vulnerability summary, scanner list, and resolved platform when the job succeeds
 
 ## List scan artifacts
 
@@ -177,6 +179,7 @@ These pages are intended for basic no-JavaScript viewing when the React bundle i
 Response includes:
 
 - parsed image metadata for the directory/detail UI
+- stored platform metadata for the selected image and related tags
 - package and vulnerability summary cards
 - available scan artifacts for download
 - related tags already stored for the same repository within the org

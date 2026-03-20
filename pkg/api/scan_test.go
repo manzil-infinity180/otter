@@ -16,6 +16,7 @@ import (
 	"github.com/anchore/syft/syft/artifact"
 	syftpkg "github.com/anchore/syft/syft/pkg"
 	syftsbom "github.com/anchore/syft/syft/sbom"
+	syftsource "github.com/anchore/syft/syft/source"
 	"github.com/otterXf/otter/pkg/attestation"
 	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compliance"
@@ -53,14 +54,16 @@ func (s stubComplianceScorecardClient) Lookup(context.Context, compliance.Reposi
 }
 
 type stubJobQueue struct {
-	job catalogscan.Job
+	job      catalogscan.Job
+	requests []catalogscan.Request
 }
 
-func (s stubJobQueue) Enqueue(catalogscan.Request) (catalogscan.Job, error) {
+func (s *stubJobQueue) Enqueue(req catalogscan.Request) (catalogscan.Job, error) {
+	s.requests = append(s.requests, req)
 	return s.job, nil
 }
 
-func (s stubJobQueue) Get(jobID string) (catalogscan.Job, bool) {
+func (s *stubJobQueue) Get(jobID string) (catalogscan.Job, bool) {
 	if s.job.ID != jobID {
 		return catalogscan.Job{}, false
 	}
@@ -155,6 +158,11 @@ func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.
 	if got, want := len(objects), 6; got != want {
 		t.Fatalf("len(objects) = %d, want %d", got, want)
 	}
+	for _, object := range objects {
+		if got, want := object.Metadata["platform"], "linux/amd64"; got != want {
+			t.Fatalf("object %q platform metadata = %q, want %q", object.Key, got, want)
+		}
+	}
 
 	record, err := repo.Get(context.Background(), "demo-org", "demo-image")
 	if err != nil {
@@ -163,6 +171,9 @@ func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.
 	if got, want := record.PackageCount, 2; got != want {
 		t.Fatalf("record.PackageCount = %d, want %d", got, want)
 	}
+	if got, want := record.Platform, "linux/amd64"; got != want {
+		t.Fatalf("record.Platform = %q, want %q", got, want)
+	}
 
 	vulnerabilities, err := vulnRepo.Get(context.Background(), "demo-org", "demo-image")
 	if err != nil {
@@ -170,6 +181,12 @@ func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.
 	}
 	if got, want := vulnerabilities.Summary.Total, 1; got != want {
 		t.Fatalf("vulnerabilities.Summary.Total = %d, want %d", got, want)
+	}
+	if got, want := vulnerabilities.Platform, "linux/amd64"; got != want {
+		t.Fatalf("vulnerabilities.Platform = %q, want %q", got, want)
+	}
+	if !bytes.Contains(resp.Body.Bytes(), []byte(`"platform":"linux/amd64"`)) {
+		t.Fatalf("expected platform in response body, body=%s", resp.Body.String())
 	}
 }
 
@@ -192,14 +209,15 @@ func TestGenerateScanSbomVulQueuesAsyncJobs(t *testing.T) {
 	}
 
 	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
-	handler.SetJobQueue(stubJobQueue{
+	queue := &stubJobQueue{
 		job: catalogscan.Job{
 			ID:        "scanjob-1234",
 			Status:    catalogscan.StatusPending,
 			Request:   catalogscan.Request{OrgID: "catalog", ImageID: "alpine-job", ImageName: "alpine:latest"},
 			CreatedAt: time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC),
 		},
-	})
+	}
+	handler.SetJobQueue(queue)
 
 	router := gin.New()
 	router.POST("/api/v1/scans", handler.GenerateScanSbomVul)
@@ -208,6 +226,7 @@ func TestGenerateScanSbomVulQueuesAsyncJobs(t *testing.T) {
 		ImageName: "alpine:latest",
 		OrgID:     "catalog",
 		ImageID:   "alpine-job",
+		Arch:      "arm64",
 		Async:     true,
 	})
 	if err != nil {
@@ -239,6 +258,12 @@ func TestGenerateScanSbomVulQueuesAsyncJobs(t *testing.T) {
 	if payload.StatusURL != "/api/v1/scan-jobs/scanjob-1234" {
 		t.Fatalf("payload.StatusURL = %q", payload.StatusURL)
 	}
+	if got, want := len(queue.requests), 1; got != want {
+		t.Fatalf("len(queue.requests) = %d, want %d", got, want)
+	}
+	if got, want := queue.requests[0].Platform, "linux/arm64"; got != want {
+		t.Fatalf("queue.requests[0].Platform = %q, want %q", got, want)
+	}
 }
 
 func TestGetScanJobReturnsQueuedJob(t *testing.T) {
@@ -260,7 +285,7 @@ func TestGetScanJobReturnsQueuedJob(t *testing.T) {
 	}
 
 	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
-	handler.SetJobQueue(stubJobQueue{
+	handler.SetJobQueue(&stubJobQueue{
 		job: catalogscan.Job{
 			ID:        "scanjob-queued",
 			Status:    catalogscan.StatusRunning,
@@ -630,6 +655,7 @@ func TestGetImageOverviewReturnsTagsAndFiles(t *testing.T) {
 			OrgID:           "demo-org",
 			ImageID:         "image-a",
 			ImageName:       "alpine:3.19",
+			Platform:        "linux/amd64",
 			SourceFormat:    sbomindex.FormatCycloneDX,
 			PackageCount:    2,
 			DependencyRoots: []string{"pkg:apk/alpine/busybox@1.0.0"},
@@ -639,6 +665,7 @@ func TestGetImageOverviewReturnsTagsAndFiles(t *testing.T) {
 			OrgID:        "demo-org",
 			ImageID:      "image-b",
 			ImageName:    "alpine:3.20",
+			Platform:     "linux/arm64",
 			SourceFormat: sbomindex.FormatCycloneDX,
 			PackageCount: 3,
 			UpdatedAt:    time.Date(2026, 3, 13, 19, 0, 0, 0, time.UTC),
@@ -708,8 +735,14 @@ func TestGetImageOverviewReturnsTagsAndFiles(t *testing.T) {
 	if got, want := len(payload.Files), 1; got != want {
 		t.Fatalf("len(payload.Files) = %d, want %d", got, want)
 	}
+	if got, want := payload.Platform, "linux/amd64"; got != want {
+		t.Fatalf("payload.Platform = %q, want %q", got, want)
+	}
 	if got, want := payload.Tags[0].Tag, "3.20"; got != want {
 		t.Fatalf("payload.Tags[0].Tag = %q, want %q", got, want)
+	}
+	if got, want := payload.Tags[0].Platform, "linux/arm64"; got != want {
+		t.Fatalf("payload.Tags[0].Platform = %q, want %q", got, want)
 	}
 }
 
@@ -1383,6 +1416,10 @@ func TestCompareImagesRejectsAmbiguousImageName(t *testing.T) {
 }
 
 func testSyftSBOM() *syftsbom.SBOM {
+	return testSyftSBOMForPlatform("linux/amd64")
+}
+
+func testSyftSBOMForPlatform(platform string) *syftsbom.SBOM {
 	root := syftpkg.Package{
 		Name:    "alpine",
 		Version: "3.20.0",
@@ -1406,6 +1443,9 @@ func testSyftSBOM() *syftsbom.SBOM {
 	dependency.SetID()
 
 	return &syftsbom.SBOM{
+		Source: syftsource.Description{
+			Metadata: mustImageMetadataForPlatform(platform),
+		},
 		Artifacts: syftsbom.Artifacts{
 			Packages: syftpkg.NewCollection(root, dependency),
 		},
@@ -1416,6 +1456,21 @@ func testSyftSBOM() *syftsbom.SBOM {
 				Type: artifact.DependencyOfRelationship,
 			},
 		},
+	}
+}
+
+func mustImageMetadataForPlatform(platform string) syftsource.ImageMetadata {
+	normalized, err := normalizeRequestedPlatform("", platform)
+	if err != nil {
+		panic(err)
+	}
+	if normalized == nil {
+		return syftsource.ImageMetadata{}
+	}
+	return syftsource.ImageMetadata{
+		OS:           normalized.OS,
+		Architecture: normalized.Architecture,
+		Variant:      normalized.Variant,
 	}
 }
 

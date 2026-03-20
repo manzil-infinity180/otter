@@ -41,7 +41,8 @@ func (s stubRegistryService) PrepareImage(context.Context, string) (registry.Ima
 }
 
 type contextCheckingAnalyzer struct {
-	t *testing.T
+	t                *testing.T
+	expectedPlatform string
 }
 
 func (a contextCheckingAnalyzer) Analyze(ctx context.Context, imageRef string) (scan.AnalysisResult, error) {
@@ -50,12 +51,18 @@ func (a contextCheckingAnalyzer) Analyze(ctx context.Context, imageRef string) (
 	if options == nil || len(options.Credentials) != 1 || options.Credentials[0].Authority != "ghcr.io" {
 		a.t.Fatalf("expected registry options in analyze context, got %#v", options)
 	}
+	if a.expectedPlatform != "" {
+		platform := scan.PlatformFromContext(ctx)
+		if platform == nil || platform.String() != a.expectedPlatform {
+			a.t.Fatalf("expected platform %q in analyze context, got %#v", a.expectedPlatform, platform)
+		}
+	}
 	return stubAnalyzer{
 		result: scan.AnalysisResult{
 			ImageRef:                imageRef,
 			SBOMDocument:            []byte(testCycloneDXDocument),
 			SBOMSPDXDocument:        []byte(testSPDXDocument),
-			SBOMData:                testSyftSBOM(),
+			SBOMData:                testSyftSBOMForPlatform("linux/arm64"),
 			CombinedVulnerabilities: []byte(`{"schema_version":"v1alpha1"}`),
 			CombinedReport:          scan.CombinedVulnerabilityReport{ImageRef: imageRef},
 		},
@@ -155,7 +162,7 @@ func TestGenerateScanUsesRegistryPreflightOptions(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 
-	handler := NewScanHandlerWithRegistry(mustLocalStore(t), mustLocalSBOMRepo(t), mustLocalVulnRepo(t), contextCheckingAnalyzer{t: t}, stubRegistryService{
+	handler := NewScanHandlerWithRegistry(mustLocalStore(t), mustLocalSBOMRepo(t), mustLocalVulnRepo(t), contextCheckingAnalyzer{t: t, expectedPlatform: "linux/arm64"}, stubRegistryService{
 		access: registry.ImageAccess{
 			Registry:   "ghcr.io",
 			AuthSource: "explicit-token",
@@ -172,6 +179,7 @@ func TestGenerateScanUsesRegistryPreflightOptions(t *testing.T) {
 		Registry:  "ghcr.io",
 		OrgID:     "demo",
 		ImageID:   "app",
+		Platform:  "linux/arm64",
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
@@ -187,6 +195,9 @@ func TestGenerateScanUsesRegistryPreflightOptions(t *testing.T) {
 	}
 	if !bytes.Contains(resp.Body.Bytes(), []byte(`"registry_auth":"explicit-token"`)) {
 		t.Fatalf("expected registry auth metadata in response, body=%s", resp.Body.String())
+	}
+	if !bytes.Contains(resp.Body.Bytes(), []byte(`"platform":"linux/arm64"`)) {
+		t.Fatalf("expected platform metadata in response, body=%s", resp.Body.String())
 	}
 }
 

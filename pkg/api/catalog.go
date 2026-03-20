@@ -25,6 +25,7 @@ type ImageCatalogEntry struct {
 	ImageID              string                          `json:"image_id"`
 	ImageName            string                          `json:"image_name"`
 	Registry             string                          `json:"registry"`
+	Platform             string                          `json:"platform,omitempty"`
 	Repository           string                          `json:"repository"`
 	RepositoryPath       string                          `json:"repository_path"`
 	Tag                  string                          `json:"tag,omitempty"`
@@ -40,6 +41,7 @@ type ImageTagSummary struct {
 	OrgID                string            `json:"org_id"`
 	ImageID              string            `json:"image_id"`
 	ImageName            string            `json:"image_name"`
+	Platform             string            `json:"platform,omitempty"`
 	Tag                  string            `json:"tag,omitempty"`
 	Digest               string            `json:"digest,omitempty"`
 	PackageCount         int               `json:"package_count"`
@@ -292,6 +294,7 @@ func (h *ScanHandler) buildCatalogEntry(ctx context.Context, record sbomindex.Re
 		ImageID:        record.ImageID,
 		ImageName:      record.ImageName,
 		Registry:       refParts.Registry,
+		Platform:       record.Platform,
 		Repository:     refParts.Repository,
 		RepositoryPath: refParts.RepositoryPath,
 		Tag:            refParts.Tag,
@@ -360,6 +363,7 @@ func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID str
 			OrgID:        candidate.OrgID,
 			ImageID:      candidate.ImageID,
 			ImageName:    candidate.ImageName,
+			Platform:     candidate.Platform,
 			Tag:          candidateRef.Tag,
 			Digest:       candidateRef.Digest,
 			PackageCount: candidate.PackageCount,
@@ -588,6 +592,7 @@ var browseCatalogTemplate = template.Must(template.New("browse-catalog").Parse(`
         <div class="chips">
           <span class="chip">{{.PackageCount}} packages</span>
           <span class="chip">{{.VulnerabilitySummary.Total}} vulnerabilities</span>
+          {{if .Platform}}<span class="chip">platform {{.Platform}}</span>{{end}}
           {{if .Tag}}<span class="chip">tag {{.Tag}}</span>{{end}}
           {{if .Digest}}<span class="chip">{{.Digest}}</span>{{end}}
         </div>
@@ -633,6 +638,7 @@ var browseImageTemplate = template.Must(template.New("browse-image").Parse(`<!do
         <div class="meta">
           <span>{{.Overview.OrgID}} / {{.Overview.ImageID}}</span>
           <span>{{.Overview.UpdatedAt.Format "2006-01-02 15:04 MST"}}</span>
+          {{if .Overview.Platform}}<span>platform {{.Overview.Platform}}</span>{{end}}
           <span>storage {{.Overview.StorageBackend}}</span>
         </div>
       </div>
@@ -683,17 +689,18 @@ var browseImageTemplate = template.Must(template.New("browse-image").Parse(`<!do
     <section class="panel">
       <h2>Tags</h2>
       <table>
-        <thead><tr><th>Tag</th><th>Image</th><th>Updated</th><th>Vulnerabilities</th></tr></thead>
+        <thead><tr><th>Tag</th><th>Image</th><th>Platform</th><th>Updated</th><th>Vulnerabilities</th></tr></thead>
         <tbody>
           {{range .Overview.Tags}}
           <tr>
             <td>{{if .Tag}}{{.Tag}}{{else}}{{.Digest}}{{end}}</td>
             <td><a href="/browse/images/{{.OrgID}}/{{.ImageID}}">{{.ImageName}}</a></td>
+            <td>{{if .Platform}}{{.Platform}}{{else}}default{{end}}</td>
             <td>{{.UpdatedAt.Format "2006-01-02 15:04 MST"}}</td>
             <td>{{.VulnerabilitySummary.Total}}</td>
           </tr>
           {{else}}
-          <tr><td colspan="4">No related tags.</td></tr>
+          <tr><td colspan="5">No related tags.</td></tr>
           {{end}}
         </tbody>
       </table>

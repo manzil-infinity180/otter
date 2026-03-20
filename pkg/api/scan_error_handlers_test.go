@@ -55,7 +55,7 @@ func TestScanHandlerErrorClassificationAndQueueErrors(t *testing.T) {
 		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
 	}
 
-	handler.SetJobQueue(stubJobQueue{job: catalogscanJob("job-1")})
+	handler.SetJobQueue(&stubJobQueue{job: catalogscanJob("job-1")})
 	resp = httptest.NewRecorder()
 	router.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs/missing", nil))
 	if got, want := resp.Code, http.StatusNotFound; got != want {

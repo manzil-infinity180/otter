@@ -30,6 +30,23 @@ func TestContextRegistryOptionsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestContextPlatformRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	platform, err := stereoscopeimage.NewPlatform("linux/arm64")
+	if err != nil {
+		t.Fatalf("NewPlatform() error = %v", err)
+	}
+
+	ctx := ContextWithPlatform(context.Background(), platform)
+	if got := PlatformFromContext(ctx); got != platform {
+		t.Fatalf("PlatformFromContext() = %#v, want %#v", got, platform)
+	}
+	if got := PlatformFromContext(context.Background()); got != nil {
+		t.Fatalf("PlatformFromContext(background) = %#v, want nil", got)
+	}
+}
+
 func TestDirectorySBOMGenerationHelpers(t *testing.T) {
 	t.Parallel()
 

@@ -32,6 +32,7 @@ type Request struct {
 	ImageID   string `json:"image_id"`
 	ImageName string `json:"image_name"`
 	Registry  string `json:"registry,omitempty"`
+	Platform  string `json:"platform,omitempty"`
 	Source    string `json:"source"`
 	Trigger   string `json:"trigger"`
 	Actor     string `json:"actor,omitempty"`
@@ -43,6 +44,7 @@ type Result struct {
 	ImageID     string                    `json:"image_id"`
 	ImageName   string                    `json:"image_name"`
 	Registry    string                    `json:"registry,omitempty"`
+	Platform    string                    `json:"platform,omitempty"`
 	Scanners    []string                  `json:"scanners,omitempty"`
 	Summary     scan.VulnerabilitySummary `json:"summary"`
 	CompletedAt time.Time                 `json:"completed_at"`

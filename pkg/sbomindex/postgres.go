@@ -65,11 +65,12 @@ func (r *PostgresRepository) Save(ctx context.Context, record Record) (Record, e
 
 	const query = `
 INSERT INTO sbom_indexes (
-	org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+	org_id, image_id, image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11)
 ON CONFLICT (org_id, image_id) DO UPDATE SET
 	image_name = EXCLUDED.image_name,
+	platform = EXCLUDED.platform,
 	source_format = EXCLUDED.source_format,
 	package_count = EXCLUDED.package_count,
 	packages = EXCLUDED.packages,
@@ -86,6 +87,7 @@ RETURNING updated_at;
 		record.OrgID,
 		record.ImageID,
 		record.ImageName,
+		record.Platform,
 		record.SourceFormat,
 		record.PackageCount,
 		packagesJSON,
@@ -107,7 +109,7 @@ func (r *PostgresRepository) Get(ctx context.Context, orgID, imageID string) (Re
 	}
 
 	const query = `
-SELECT image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+SELECT image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 FROM sbom_indexes
 WHERE org_id = $1 AND image_id = $2;
 `
@@ -123,6 +125,7 @@ WHERE org_id = $1 AND image_id = $2;
 
 	if err := r.db.QueryRowContext(ctx, query, orgID, imageID).Scan(
 		&record.ImageName,
+		&record.Platform,
 		&record.SourceFormat,
 		&record.PackageCount,
 		&packagesJSON,
@@ -161,7 +164,7 @@ WHERE org_id = $1 AND image_id = $2;
 
 func (r *PostgresRepository) List(ctx context.Context) ([]Record, error) {
 	const query = `
-SELECT org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+SELECT org_id, image_id, image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 FROM sbom_indexes
 ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 `
@@ -187,6 +190,7 @@ ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 			&record.OrgID,
 			&record.ImageID,
 			&record.ImageName,
+			&record.Platform,
 			&record.SourceFormat,
 			&record.PackageCount,
 			&packagesJSON,
@@ -230,7 +234,7 @@ func (r *PostgresRepository) FindByImageName(ctx context.Context, imageName stri
 	}
 
 	const query = `
-SELECT org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+SELECT org_id, image_id, image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 FROM sbom_indexes
 WHERE image_name = $1
 ORDER BY updated_at DESC, org_id ASC, image_id ASC;
@@ -257,6 +261,7 @@ ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 			&record.OrgID,
 			&record.ImageID,
 			&record.ImageName,
+			&record.Platform,
 			&record.SourceFormat,
 			&record.PackageCount,
 			&packagesJSON,

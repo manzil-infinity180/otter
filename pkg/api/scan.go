@@ -37,6 +37,7 @@ const (
 
 type ImageGeneratePayload struct {
 	Arch      string `json:"arch"`
+	Platform  string `json:"platform"`
 	ImageName string `json:"image_name"`
 	Registry  string `json:"registry"`
 	OrgID     string `json:"org_id"`
@@ -81,6 +82,7 @@ type ScanExecutionResult struct {
 	ImageID         string                    `json:"image_id"`
 	ImageName       string                    `json:"image_name"`
 	Registry        string                    `json:"registry"`
+	Platform        string                    `json:"platform,omitempty"`
 	RegistryAuth    string                    `json:"registry_auth"`
 	StorageBackend  string                    `json:"storage_backend"`
 	Summary         scan.VulnerabilitySummary `json:"summary"`
@@ -130,6 +132,12 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 	}
 	payload.OrgID = orgID
 	payload.ImageID = imageID
+	requestedPlatform, err := normalizeRequestedPlatform(payload.Arch, payload.Platform)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	payload.Platform = platformString(requestedPlatform)
 	actor := auditActorFromContext(c)
 
 	if payload.Async || strings.EqualFold(c.Query("async"), "true") {
@@ -138,6 +146,7 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		request.Platform = payload.Platform
 		request.Actor = actor.ID
 		request.ActorType = actor.Type
 		if h.jobs == nil {
@@ -166,6 +175,7 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 				"registry":   request.Registry,
 				"job_id":     job.ID,
 				"mode":       "async",
+				"platform":   request.Platform,
 				"source":     request.Source,
 				"trigger":    request.Trigger,
 			},
@@ -193,6 +203,7 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 				"image_name": payload.ImageName,
 				"registry":   payload.Registry,
 				"mode":       "sync",
+				"platform":   payload.Platform,
 				"source":     catalogscan.SourceAPI,
 				"trigger":    catalogscan.TriggerManual,
 			},
@@ -216,6 +227,7 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			"summary_total":   result.Summary.Total,
 			"scanners":        append([]string(nil), result.Scanners...),
 			"mode":            "sync",
+			"platform":        result.Platform,
 			"source":          catalogscan.SourceAPI,
 			"trigger":         catalogscan.TriggerManual,
 		},
@@ -257,6 +269,7 @@ func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Re
 		Registry:  req.Registry,
 		OrgID:     req.OrgID,
 		ImageID:   req.ImageID,
+		Platform:  req.Platform,
 	})
 	if err != nil {
 		h.recordAuditEvent(ctx, audit.Event{
@@ -272,6 +285,7 @@ func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Re
 				"image_name": req.ImageName,
 				"registry":   req.Registry,
 				"mode":       "async",
+				"platform":   req.Platform,
 				"source":     req.Source,
 				"trigger":    req.Trigger,
 			},
@@ -284,6 +298,7 @@ func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Re
 		ImageID:     result.ImageID,
 		ImageName:   result.ImageName,
 		Registry:    result.Registry,
+		Platform:    result.Platform,
 		Scanners:    append([]string(nil), result.Scanners...),
 		Summary:     result.Summary,
 		CompletedAt: time.Now().UTC(),
@@ -302,6 +317,7 @@ func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Re
 			"summary_total":   catalogResult.Summary.Total,
 			"scanners":        append([]string(nil), catalogResult.Scanners...),
 			"mode":            "async",
+			"platform":        catalogResult.Platform,
 			"source":          req.Source,
 			"trigger":         req.Trigger,
 			"storage_backend": h.store.Backend(),
@@ -327,20 +343,31 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
 
+	requestedPlatform, err := normalizeRequestedPlatform(payload.Arch, payload.Platform)
+	if err != nil {
+		return ScanExecutionResult{}, err
+	}
+
 	imageAccess, err := h.registry.PrepareImage(ctx, payload.ImageName)
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("prepare image pull: %w", err)
 	}
 	ctx = scan.ContextWithRegistryOptions(ctx, imageAccess.RegistryOptions)
+	ctx = scan.ContextWithPlatform(ctx, requestedPlatform)
 
 	result, err := h.analyzer.Analyze(ctx, payload.ImageName)
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("analyze image: %w", err)
 	}
+	resolvedPlatform := resolvedPlatformFromSBOM(result.SBOMData)
+	if resolvedPlatform == "" {
+		resolvedPlatform = platformString(requestedPlatform)
+	}
 	record, err := sbomindex.BuildRecordFromSyft(orgID, imageID, payload.ImageName, result.SBOMData)
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("index sbom: %w", err)
 	}
+	record.Platform = resolvedPlatform
 	existingVulnerabilities, err := h.getExistingVulnerabilityRecord(ctx, orgID, imageID)
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("load vulnerability history: %w", err)
@@ -349,6 +376,7 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("index vulnerabilities: %w", err)
 	}
+	vulnerabilityRecord.Platform = resolvedPlatform
 
 	keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
 	sbomKey, err := keyBuilder.BuildSBOMKey()
@@ -376,50 +404,61 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		Metadata     map[string]string
 	}
 
+	artifactMetadata := func(values map[string]string) map[string]string {
+		metadata := make(map[string]string, len(values)+1)
+		for key, value := range values {
+			metadata[key] = value
+		}
+		if resolvedPlatform != "" {
+			metadata["platform"] = resolvedPlatform
+		}
+		return metadata
+	}
+
 	uploads := []artifactUpload{
 		{
 			ResponseName: "sbom",
 			Key:          sbomKey,
 			Data:         result.SBOMDocument,
 			ContentType:  "application/vnd.cyclonedx+json",
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "sbom",
 				"format":     sbomindex.FormatCycloneDX,
 				"image_name": payload.ImageName,
-			},
+			}),
 		},
 		{
 			ResponseName: "sbom_cyclonedx",
 			Key:          cycloneDXKey,
 			Data:         result.SBOMDocument,
 			ContentType:  "application/vnd.cyclonedx+json",
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "sbom",
 				"format":     sbomindex.FormatCycloneDX,
 				"image_name": payload.ImageName,
-			},
+			}),
 		},
 		{
 			ResponseName: "sbom_spdx",
 			Key:          spdxKey,
 			Data:         result.SBOMSPDXDocument,
 			ContentType:  "application/spdx+json",
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "sbom",
 				"format":     sbomindex.FormatSPDX,
 				"image_name": payload.ImageName,
-			},
+			}),
 		},
 		{
 			ResponseName: "vulnerabilities",
 			Key:          vulnerabilityKey,
 			Data:         result.CombinedVulnerabilities,
 			ContentType:  "application/json",
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "vulnerabilities",
 				"scanner":    "combined",
 				"image_name": payload.ImageName,
-			},
+			}),
 		},
 	}
 	for _, report := range result.ScannerReports {
@@ -432,11 +471,11 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 			Key:          key,
 			Data:         report.Document,
 			ContentType:  report.ContentType,
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "vulnerabilities",
 				"scanner":    report.Scanner,
 				"image_name": payload.ImageName,
-			},
+			}),
 		})
 	}
 
@@ -495,6 +534,7 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		ImageID:        imageID,
 		ImageName:      payload.ImageName,
 		Registry:       imageAccess.Registry,
+		Platform:       resolvedPlatform,
 		RegistryAuth:   imageAccess.AuthSource,
 		StorageBackend: h.store.Backend(),
 		Summary:        result.Summary,

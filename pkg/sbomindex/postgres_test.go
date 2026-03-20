@@ -25,6 +25,7 @@ func TestPostgresRepositorySaveGetDelete(t *testing.T) {
 		OrgID:        "demo-org",
 		ImageID:      "demo-image",
 		ImageName:    "alpine:latest",
+		Platform:     "linux/arm64",
 		SourceFormat: FormatCycloneDX,
 		PackageCount: 1,
 		Packages: []PackageRecord{
@@ -40,11 +41,12 @@ func TestPostgresRepositorySaveGetDelete(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 INSERT INTO sbom_indexes (
-	org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+	org_id, image_id, image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11)
 ON CONFLICT (org_id, image_id) DO UPDATE SET
 	image_name = EXCLUDED.image_name,
+	platform = EXCLUDED.platform,
 	source_format = EXCLUDED.source_format,
 	package_count = EXCLUDED.package_count,
 	packages = EXCLUDED.packages,
@@ -58,6 +60,7 @@ RETURNING updated_at;
 			record.OrgID,
 			record.ImageID,
 			record.ImageName,
+			record.Platform,
 			record.SourceFormat,
 			record.PackageCount,
 			sqlmock.AnyArg(),
@@ -77,15 +80,16 @@ RETURNING updated_at;
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+SELECT image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 FROM sbom_indexes
 WHERE org_id = $1 AND image_id = $2;
 `)).
 		WithArgs(record.OrgID, record.ImageID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"image_name", "source_format", "package_count", "packages", "dependency_tree", "dependency_roots", "license_summary", "updated_at",
+			"image_name", "platform", "source_format", "package_count", "packages", "dependency_tree", "dependency_roots", "license_summary", "updated_at",
 		}).AddRow(
 			record.ImageName,
+			record.Platform,
 			record.SourceFormat,
 			record.PackageCount,
 			`[{"id":"pkg:apk/alpine/busybox@1.0.0","name":"busybox","version":"1.0.0","licenses":["MIT"]}]`,
@@ -101,6 +105,9 @@ WHERE org_id = $1 AND image_id = $2;
 	}
 	if got.PackageCount != 1 || got.Packages[0].Name != "busybox" {
 		t.Fatalf("Get() = %#v", got)
+	}
+	if got.Platform != record.Platform {
+		t.Fatalf("Get() Platform = %q, want %q", got.Platform, record.Platform)
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM sbom_indexes WHERE org_id = $1 AND image_id = $2`)).
@@ -138,17 +145,17 @@ func TestPostgresRepositoryFindByImageName(t *testing.T) {
 	now := time.Now().UTC()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+SELECT org_id, image_id, image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 FROM sbom_indexes
 WHERE image_name = $1
 ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 `)).
 		WithArgs("alpine:latest").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"org_id", "image_id", "image_name", "source_format", "package_count", "packages", "dependency_tree", "dependency_roots", "license_summary", "updated_at",
+			"org_id", "image_id", "image_name", "platform", "source_format", "package_count", "packages", "dependency_tree", "dependency_roots", "license_summary", "updated_at",
 		}).
-			AddRow("demo-org", "image-a", "alpine:latest", FormatCycloneDX, 1, `[]`, `[]`, `[]`, `[]`, now).
-			AddRow("demo-two", "image-b", "alpine:latest", FormatCycloneDX, 2, `[]`, `[]`, `[]`, `[]`, now))
+			AddRow("demo-org", "image-a", "alpine:latest", "linux/amd64", FormatCycloneDX, 1, `[]`, `[]`, `[]`, `[]`, now).
+			AddRow("demo-two", "image-b", "alpine:latest", "linux/arm64", FormatCycloneDX, 2, `[]`, `[]`, `[]`, `[]`, now))
 
 	records, err := repo.FindByImageName(context.Background(), "alpine:latest")
 	if err != nil {
@@ -176,15 +183,15 @@ func TestPostgresRepositoryList(t *testing.T) {
 	now := time.Now().UTC()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT org_id, image_id, image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+SELECT org_id, image_id, image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 FROM sbom_indexes
 ORDER BY updated_at DESC, org_id ASC, image_id ASC;
 `)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"org_id", "image_id", "image_name", "source_format", "package_count", "packages", "dependency_tree", "dependency_roots", "license_summary", "updated_at",
+			"org_id", "image_id", "image_name", "platform", "source_format", "package_count", "packages", "dependency_tree", "dependency_roots", "license_summary", "updated_at",
 		}).
-			AddRow("demo-org", "image-a", "alpine:3.20", FormatCycloneDX, 2, `[]`, `[]`, `[]`, `[]`, now).
-			AddRow("demo-org", "image-b", "alpine:3.19", FormatCycloneDX, 1, `[]`, `[]`, `[]`, `[]`, now.Add(-time.Hour)))
+			AddRow("demo-org", "image-a", "alpine:3.20", "linux/amd64", FormatCycloneDX, 2, `[]`, `[]`, `[]`, `[]`, now).
+			AddRow("demo-org", "image-b", "alpine:3.19", "linux/arm64", FormatCycloneDX, 1, `[]`, `[]`, `[]`, `[]`, now.Add(-time.Hour)))
 
 	records, err := repo.List(context.Background())
 	if err != nil {
@@ -210,7 +217,7 @@ func TestPostgresRepositoryErrorPaths(t *testing.T) {
 
 	repo := newPostgresRepositoryWithDB(db)
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT image_name, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
+SELECT image_name, platform, source_format, package_count, packages, dependency_tree, dependency_roots, license_summary, updated_at
 FROM sbom_indexes
 WHERE org_id = $1 AND image_id = $2;
 `)).

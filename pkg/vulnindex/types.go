@@ -108,6 +108,7 @@ type Record struct {
 	OrgID              string                `json:"org_id"`
 	ImageID            string                `json:"image_id"`
 	ImageName          string                `json:"image_name,omitempty"`
+	Platform           string                `json:"platform,omitempty"`
 	Summary            Summary               `json:"summary"`
 	Vulnerabilities    []VulnerabilityRecord `json:"vulnerabilities"`
 	FixRecommendations []FixRecommendation   `json:"fix_recommendations"`

@@ -68,11 +68,12 @@ func (r *PostgresRepository) Save(ctx context.Context, record Record) (Record, e
 
 	const query = `
 INSERT INTO vulnerability_indexes (
-	org_id, image_id, image_name, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
+	org_id, image_id, image_name, platform, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
 )
-VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10)
 ON CONFLICT (org_id, image_id) DO UPDATE SET
 	image_name = EXCLUDED.image_name,
+	platform = EXCLUDED.platform,
 	summary = EXCLUDED.summary,
 	vulnerabilities = EXCLUDED.vulnerabilities,
 	fix_recommendations = EXCLUDED.fix_recommendations,
@@ -88,6 +89,7 @@ RETURNING updated_at;
 		record.OrgID,
 		record.ImageID,
 		record.ImageName,
+		record.Platform,
 		summaryJSON,
 		vulnerabilitiesJSON,
 		recommendationsJSON,
@@ -108,7 +110,7 @@ func (r *PostgresRepository) Get(ctx context.Context, orgID, imageID string) (Re
 	}
 
 	const query = `
-SELECT image_name, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
+SELECT image_name, platform, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
 FROM vulnerability_indexes
 WHERE org_id = $1 AND image_id = $2;
 `
@@ -125,6 +127,7 @@ WHERE org_id = $1 AND image_id = $2;
 
 	if err := r.db.QueryRowContext(ctx, query, orgID, imageID).Scan(
 		&record.ImageName,
+		&record.Platform,
 		&summaryJSON,
 		&vulnerabilitiesJSON,
 		&recommendationsJSON,

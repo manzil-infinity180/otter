@@ -154,6 +154,7 @@ export function ImageDetailPage() {
             <p className="max-w-3xl text-base text-ink-600 dark:text-ink-300">{overview.image_name}</p>
             <div className="flex flex-wrap gap-2">
               {overview.tag ? <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">tag {overview.tag}</span> : null}
+              {overview.platform ? <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-200">platform {overview.platform}</span> : null}
               {overview.scanners.map((scanner) => (
                 <span key={scanner} className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/70 dark:text-sky-200">
                   {scanner}
@@ -221,6 +222,7 @@ export function ImageDetailPage() {
                 <h2 className="font-display text-2xl text-ink-900 dark:text-white">Scan summary</h2>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <StatCard label="Registry" value={overview.registry || "local"} />
+                  <StatCard label="Platform" value={overview.platform || "default"} />
                   <StatCard label="Repository" value={overview.repository_path || overview.image_name} />
                   <StatCard label="Fixable" value={overview.vulnerability_summary.fixable} />
                   <StatCard label="Unfixable" value={overview.vulnerability_summary.unfixable} />
@@ -415,6 +417,7 @@ export function ImageDetailPage() {
                     <tr>
                       <th className="pb-3">Tag / Digest</th>
                       <th className="pb-3">Image</th>
+                      <th className="pb-3">Platform</th>
                       <th className="pb-3">Updated</th>
                       <th className="pb-3">Vulnerabilities</th>
                     </tr>
@@ -428,6 +431,7 @@ export function ImageDetailPage() {
                             {tagItem.image_name}
                           </Link>
                         </td>
+                        <td className="py-3 text-ink-600 dark:text-ink-300">{tagItem.platform || "default"}</td>
                         <td className="py-3 text-ink-600 dark:text-ink-300">{formatTimestamp(tagItem.updated_at)}</td>
                         <td className="py-3 text-ink-600 dark:text-ink-300">{tagItem.vulnerability_summary.total}</td>
                       </tr>

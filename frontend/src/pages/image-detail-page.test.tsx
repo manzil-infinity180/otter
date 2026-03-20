@@ -37,6 +37,7 @@ describe("ImageDetailPage", () => {
             image_id: "image-a",
             image_name: "alpine:3.20",
             registry: "index.docker.io",
+            platform: "linux/arm64",
             repository: "index.docker.io/library/alpine",
             repository_path: "library/alpine",
             tag: "3.20",
@@ -60,6 +61,7 @@ describe("ImageDetailPage", () => {
                 org_id: "demo-org",
                 image_id: "image-b",
                 image_name: "alpine:3.19",
+                platform: "linux/amd64",
                 tag: "3.19",
                 package_count: 10,
                 vulnerability_summary: {
@@ -326,6 +328,7 @@ describe("ImageDetailPage", () => {
     renderImagePage();
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "library/alpine" })).toBeInTheDocument());
+    expect(screen.getByText("platform linux/arm64")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
 
     await user.click(screen.getByRole("tab", { name: "Vulnerabilities" }));
@@ -378,6 +381,7 @@ describe("ImageDetailPage", () => {
     await user.click(screen.getByRole("tab", { name: "Tags" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Repository tags" })).toBeInTheDocument());
     expect(screen.getByText("alpine:3.19")).toBeInTheDocument();
+    expect(screen.getByText("linux/amd64")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "SBOM" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "SBOM package inventory" })).toBeInTheDocument());
