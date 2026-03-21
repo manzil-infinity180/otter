@@ -24,10 +24,31 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-10` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-11` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-11: verify signatures and attestations per record
+
+What changed:
+
+- refactored `pkg/attestation/discover.go` so discovery keeps per-record verification match material derived from each referrer artifact instead of applying one shared verification result to the whole signature or attestation slice
+- changed cosign verification handling to parse individual JSON verification entries, support array and streamed output shapes, and match each verified payload back to the correct discovered signature or attestation record
+- left unmatched discovered records in an explicit per-record `invalid` state when cosign verification succeeds for only a subset of records, so mixed valid and invalid outcomes now round-trip through the API model instead of being flattened
+- added regression coverage for mixed verification outcomes across multiple discovered signatures and attestations, plus parser coverage for multiple cosign output formats
+
+What was verified:
+
+- `go test ./pkg/attestation`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- record matching is fingerprint-based on the discovered signature payload or attestation envelope/statement, with signer, issuer, predicate, subject-digest, and timestamp data used only to break ties when the verified material overlaps
+- when cosign succeeds but does not return a discovered record, Otter now reports that record as `invalid` with a per-record message instead of inheriting the status of another record
 
 ### OTTER-AUDIT-10: cache and paginate remote repository tag discovery
 

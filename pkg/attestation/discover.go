@@ -3,6 +3,9 @@ package attestation
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,6 +86,20 @@ type ArtifactLayer struct {
 	Data       []byte
 }
 
+type discoveredRecord struct {
+	record  Record
+	matcher verificationMatcher
+}
+
+type verificationMatcher struct {
+	fingerprints  map[string]struct{}
+	subjectDigest string
+	predicateType string
+	signer        string
+	issuer        string
+	timestamp     *time.Time
+}
+
 type Discoverer struct {
 	cfg      Config
 	registry RegistryClient
@@ -108,8 +125,8 @@ func (d *Discoverer) Discover(ctx context.Context, imageRef string) (Result, err
 		return Result{}, fmt.Errorf("list referrers: %w", err)
 	}
 
-	signatures := make([]Record, 0)
-	attestations := make([]Record, 0)
+	signatures := make([]discoveredRecord, 0)
+	attestations := make([]discoveredRecord, 0)
 	var mu sync.Mutex
 
 	group, groupCtx := errgroup.WithContext(ctx)
@@ -123,7 +140,7 @@ func (d *Discoverer) Discover(ctx context.Context, imageRef string) (Result, err
 
 			record := analyzeArtifact(referrer, artifact)
 			mu.Lock()
-			switch record.Kind {
+			switch record.record.Kind {
 			case KindSignature:
 				signatures = append(signatures, record)
 			case KindAttestation:
@@ -151,15 +168,15 @@ func (d *Discoverer) Discover(ctx context.Context, imageRef string) (Result, err
 		ImageRef:     resolved.ImageRef,
 		CanonicalRef: resolved.CanonicalRef,
 		ImageDigest:  resolved.ImageDigest,
-		Signatures:   signatures,
-		Attestations: attestations,
+		Signatures:   unwrapRecords(signatures),
+		Attestations: unwrapRecords(attestations),
 		UpdatedAt:    time.Now().UTC(),
 	}
 	result.Summary = summarize(result)
 	return result, nil
 }
 
-func analyzeArtifact(referrer Referrer, artifact Artifact) Record {
+func analyzeArtifact(referrer Referrer, artifact Artifact) discoveredRecord {
 	record := Record{
 		Digest:             referrer.Descriptor.Digest.String(),
 		MediaType:          string(referrer.Descriptor.MediaType),
@@ -183,7 +200,10 @@ func analyzeArtifact(referrer Referrer, artifact Artifact) Record {
 	if len(record.Annotations) == 0 {
 		record.Annotations = nil
 	}
-	return record
+	return discoveredRecord{
+		record:  record,
+		matcher: buildVerificationMatcher(record, artifact),
+	}
 }
 
 func classifyArtifact(record Record) string {
@@ -212,7 +232,18 @@ type verificationOutcome struct {
 	Timestamp *time.Time
 }
 
-func (d *Discoverer) verify(ctx context.Context, attestations bool, imageRef string) verificationOutcome {
+type verifiedEntry struct {
+	matcher verificationMatcher
+	outcome verificationOutcome
+}
+
+type verificationReport struct {
+	Entries         []verifiedEntry
+	DefaultOutcome  verificationOutcome
+	StrictUnmatched bool
+}
+
+func (d *Discoverer) verify(ctx context.Context, attestations bool, imageRef string) verificationReport {
 	verifyCtx := ctx
 	cancel := func() {}
 	if d.cfg.CosignTimeout > 0 {
@@ -235,6 +266,11 @@ func (d *Discoverer) verify(ctx context.Context, attestations bool, imageRef str
 	args = append(args, imageRef)
 
 	stdout, stderr, err := d.runner.Run(verifyCtx, d.cfg.CosignBinary, args...)
+	entries, parseErr := parseVerificationEntries(stdout)
+	report := verificationReport{
+		Entries:        buildVerifiedEntries(entries),
+		DefaultOutcome: verificationOutcome{Status: VerificationStatusInvalid},
+	}
 	if err != nil {
 		message := strings.TrimSpace(string(stderr))
 		if message == "" {
@@ -244,36 +280,70 @@ func (d *Discoverer) verify(ctx context.Context, attestations bool, imageRef str
 			if message == "" {
 				message = "cosign binary is not available"
 			}
-			return verificationOutcome{Status: VerificationStatusUnverified, Message: message}
+			report.DefaultOutcome = verificationOutcome{Status: VerificationStatusUnverified, Message: message}
+			return report
 		}
 		if message == "" {
 			message = err.Error()
 		}
-		return verificationOutcome{Status: VerificationStatusInvalid, Message: message}
+		report.DefaultOutcome = verificationOutcome{Status: VerificationStatusInvalid, Message: message}
+		report.StrictUnmatched = len(report.Entries) > 0
+		return report
 	}
 
-	outcome := verificationOutcome{Status: VerificationStatusValid}
-	var entries []json.RawMessage
-	if err := json.Unmarshal(stdout, &entries); err == nil {
-		outcome.Signer, outcome.Issuer, outcome.Timestamp = extractVerificationMetadata(entries)
-		return outcome
+	report.DefaultOutcome = verificationOutcome{
+		Status:  VerificationStatusInvalid,
+		Message: "record was discovered but was not returned by cosign verification",
 	}
-
-	return outcome
+	report.StrictUnmatched = true
+	if parseErr != nil {
+		report.Entries = nil
+		report.DefaultOutcome = verificationOutcome{
+			Status:  VerificationStatusValid,
+			Message: "",
+		}
+		report.StrictUnmatched = false
+	}
+	return report
 }
 
-func applyVerification(records []Record, outcome verificationOutcome) {
+func applyVerification(records []discoveredRecord, report verificationReport) {
+	used := make([]bool, len(records))
+	for _, entry := range report.Entries {
+		index := matchVerificationRecord(records, used, entry)
+		if index < 0 {
+			continue
+		}
+		used[index] = true
+		records[index].record.VerificationStatus = entry.outcome.Status
+		records[index].record.VerificationMessage = entry.outcome.Message
+		if records[index].record.Signer == "" {
+			records[index].record.Signer = entry.outcome.Signer
+		}
+		if records[index].record.Issuer == "" {
+			records[index].record.Issuer = entry.outcome.Issuer
+		}
+		if records[index].record.Timestamp == nil {
+			records[index].record.Timestamp = entry.outcome.Timestamp
+		}
+	}
 	for i := range records {
-		records[i].VerificationStatus = outcome.Status
-		records[i].VerificationMessage = outcome.Message
-		if records[i].Signer == "" {
-			records[i].Signer = outcome.Signer
+		if used[i] {
+			continue
 		}
-		if records[i].Issuer == "" {
-			records[i].Issuer = outcome.Issuer
+		if !report.StrictUnmatched && len(report.Entries) > 0 {
+			continue
 		}
-		if records[i].Timestamp == nil {
-			records[i].Timestamp = outcome.Timestamp
+		records[i].record.VerificationStatus = report.DefaultOutcome.Status
+		records[i].record.VerificationMessage = report.DefaultOutcome.Message
+		if records[i].record.Signer == "" {
+			records[i].record.Signer = report.DefaultOutcome.Signer
+		}
+		if records[i].record.Issuer == "" {
+			records[i].record.Issuer = report.DefaultOutcome.Issuer
+		}
+		if records[i].record.Timestamp == nil {
+			records[i].record.Timestamp = report.DefaultOutcome.Timestamp
 		}
 	}
 }
@@ -295,16 +365,24 @@ func summarize(result Result) Summary {
 	return summary
 }
 
-func sortRecords(records []Record) {
+func sortRecords(records []discoveredRecord) {
 	sort.Slice(records, func(i, j int) bool {
-		if records[i].PredicateType != records[j].PredicateType {
-			return records[i].PredicateType < records[j].PredicateType
+		if records[i].record.PredicateType != records[j].record.PredicateType {
+			return records[i].record.PredicateType < records[j].record.PredicateType
 		}
-		if records[i].Digest != records[j].Digest {
-			return records[i].Digest < records[j].Digest
+		if records[i].record.Digest != records[j].record.Digest {
+			return records[i].record.Digest < records[j].record.Digest
 		}
-		return records[i].ArtifactType < records[j].ArtifactType
+		return records[i].record.ArtifactType < records[j].record.ArtifactType
 	})
+}
+
+func unwrapRecords(records []discoveredRecord) []Record {
+	result := make([]Record, 0, len(records))
+	for _, record := range records {
+		result = append(result, record.record)
+	}
+	return result
 }
 
 func inferredArtifactType(manifest *v1.Manifest) string {
@@ -329,6 +407,210 @@ func copyStringMap(input map[string]string) map[string]string {
 		result[key] = value
 	}
 	return result
+}
+
+func buildVerificationMatcher(record Record, artifact Artifact) verificationMatcher {
+	matcher := verificationMatcher{
+		fingerprints:  make(map[string]struct{}),
+		subjectDigest: strings.TrimSpace(record.SubjectDigest),
+		predicateType: strings.TrimSpace(record.PredicateType),
+		signer:        strings.TrimSpace(record.Signer),
+		issuer:        strings.TrimSpace(record.Issuer),
+		timestamp:     record.Timestamp,
+	}
+
+	for _, layer := range artifact.Layers {
+		addFingerprint(&matcher, layer.Data)
+		decoded := decodeDSSEPayload(layer.Data)
+		addFingerprint(&matcher, decoded)
+	}
+	if len(matcher.fingerprints) == 0 {
+		matcher.fingerprints = nil
+	}
+	return matcher
+}
+
+func parseVerificationEntries(stdout []byte) ([]json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(stdout)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+
+	var array []json.RawMessage
+	if err := json.Unmarshal(trimmed, &array); err == nil {
+		return array, nil
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	entries := make([]json.RawMessage, 0)
+	for {
+		var entry json.RawMessage
+		if err := decoder.Decode(&entry); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+		entry = bytes.TrimSpace(entry)
+		if len(entry) == 0 || bytes.Equal(entry, []byte("null")) {
+			continue
+		}
+		entries = append(entries, append(json.RawMessage(nil), entry...))
+	}
+	return entries, nil
+}
+
+func buildVerifiedEntries(entries []json.RawMessage) []verifiedEntry {
+	result := make([]verifiedEntry, 0, len(entries))
+	for _, entry := range entries {
+		matcher := buildVerificationMatcherFromJSON(entry)
+		outcome := verificationOutcome{
+			Status:    VerificationStatusValid,
+			Signer:    matcher.signer,
+			Issuer:    matcher.issuer,
+			Timestamp: matcher.timestamp,
+		}
+		result = append(result, verifiedEntry{
+			matcher: matcher,
+			outcome: outcome,
+		})
+	}
+	return result
+}
+
+func buildVerificationMatcherFromJSON(document []byte) verificationMatcher {
+	matcher := verificationMatcher{
+		fingerprints: make(map[string]struct{}),
+	}
+	addFingerprint(&matcher, document)
+	decoded := decodeDSSEPayload(document)
+	addFingerprint(&matcher, decoded)
+
+	var payload any
+	if err := json.Unmarshal(document, &payload); err == nil {
+		if typed, ok := payload.(map[string]any); ok {
+			matcher.subjectDigest = strings.TrimSpace(firstNonEmpty(
+				nestedString(typed, "critical", "image", "docker-manifest-digest"),
+				nestedString(typed, "Critical", "Image", "Docker-manifest-digest"),
+			))
+			matcher.predicateType = strings.TrimSpace(firstNonEmpty(
+				stringValue(typed["predicateType"]),
+				stringValue(typed["PredicateType"]),
+			))
+		}
+	}
+
+	signer, issuer, timestamp := extractVerificationMetadata([]json.RawMessage{document})
+	matcher.signer = signer
+	matcher.issuer = issuer
+	matcher.timestamp = timestamp
+	if len(matcher.fingerprints) == 0 {
+		matcher.fingerprints = nil
+	}
+	return matcher
+}
+
+func addFingerprint(matcher *verificationMatcher, document []byte) {
+	if matcher == nil {
+		return
+	}
+	sum, ok := canonicalJSONFingerprint(document)
+	if !ok {
+		return
+	}
+	if matcher.fingerprints == nil {
+		matcher.fingerprints = make(map[string]struct{})
+	}
+	matcher.fingerprints[sum] = struct{}{}
+}
+
+func canonicalJSONFingerprint(document []byte) (string, bool) {
+	trimmed := bytes.TrimSpace(document)
+	if len(trimmed) == 0 || !json.Valid(trimmed) {
+		return "", false
+	}
+	var decoded any
+	if err := json.Unmarshal(trimmed, &decoded); err != nil {
+		return "", false
+	}
+	normalized, err := json.Marshal(decoded)
+	if err != nil {
+		return "", false
+	}
+	sum := sha256.Sum256(normalized)
+	return hex.EncodeToString(sum[:]), true
+}
+
+func decodeDSSEPayload(document []byte) []byte {
+	trimmed := bytes.TrimSpace(document)
+	if len(trimmed) == 0 || !json.Valid(trimmed) {
+		return nil
+	}
+	var envelope dsseEnvelope
+	if err := json.Unmarshal(trimmed, &envelope); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(envelope.Payload) == "" {
+		return nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(envelope.Payload)
+	if err != nil || !json.Valid(decoded) {
+		return nil
+	}
+	return decoded
+}
+
+func matchVerificationRecord(records []discoveredRecord, used []bool, entry verifiedEntry) int {
+	bestIndex := -1
+	bestScore := 0
+	for i, record := range records {
+		if used[i] {
+			continue
+		}
+		score := verificationMatchScore(record.matcher, entry.matcher)
+		if score > bestScore {
+			bestScore = score
+			bestIndex = i
+		}
+	}
+	return bestIndex
+}
+
+func verificationMatchScore(record verificationMatcher, entry verificationMatcher) int {
+	score := 0
+	matchedFingerprint := false
+	for fingerprint := range entry.fingerprints {
+		if _, ok := record.fingerprints[fingerprint]; ok {
+			score += 100
+			matchedFingerprint = true
+		}
+	}
+	if !matchedFingerprint {
+		return 0
+	}
+	if record.subjectDigest != "" && record.subjectDigest == entry.subjectDigest {
+		score += 10
+	}
+	if record.predicateType != "" && record.predicateType == entry.predicateType {
+		score += 10
+	}
+	if record.signer != "" && record.signer == entry.signer {
+		score += 5
+	}
+	if record.issuer != "" && record.issuer == entry.issuer {
+		score += 3
+	}
+	if timesEqual(record.timestamp, entry.timestamp) {
+		score += 2
+	}
+	return score
+}
+
+func timesEqual(left *time.Time, right *time.Time) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	return left.UTC().Truncate(time.Second).Equal(right.UTC().Truncate(time.Second))
 }
 
 func extractVerificationMetadata(entries []json.RawMessage) (string, string, *time.Time) {
