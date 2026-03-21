@@ -24,10 +24,34 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-08` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-09` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-09: indexed catalog queries and pagination
+
+What changed:
+
+- restored and extended the `pkg/sbomindex` local repository with lightweight catalog sidecars plus per-repository tag indexes, so catalog listings no longer need to deserialize full SBOM records or scan every repository to build the image overview tag list
+- added repository-level `QueryCatalog` and `ListRepositoryTags` support to both local and PostgreSQL SBOM index backends, including a new PostgreSQL migration that persists `repository_key` and adds supporting indexes for catalog and tag lookups
+- refactored `pkg/api/catalog.go` to serve `GET /api/v1/catalog` and `/browse` from the indexed query path, with additive `page`, `page_size`, `total`, and `has_more` response metadata while preserving the existing `items` and `count` fields
+- switched image overview tag resolution from a full `sbomIndex.List()` scan to `ListRepositoryTags`, so related-tag queries stay scoped to the current repository instead of walking the full catalog
+- added local vulnerability summary sidecars so the filesystem-backed catalog query can still filter and sort on vulnerability severity without loading full vulnerability documents for every record
+- added regression coverage for local and PostgreSQL catalog pagination, severity-aware query behavior, repository tag lookups, and API pagination metadata
+
+What was verified:
+
+- `go test ./pkg/sbomindex ./pkg/api`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- `GET /api/v1/catalog` now returns additive pagination metadata fields; older clients remain compatible because the existing `items` and `count` fields are unchanged
+- PostgreSQL deployments need the new `000006_add_sbom_repository_keys` migration before the indexed catalog and repository-tag queries can use the persisted `repository_key` column
+- existing local filesystem data picks up catalog sidecars opportunistically as records are rewritten; PostgreSQL records are backfilled by the migration, but operators with mixed historical image-name formats should still prefer rescanning if they need the most consistent repository grouping
 
 ### OTTER-AUDIT-08: persistent scan-job storage, retries, and restart recovery
 

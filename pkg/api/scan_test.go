@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -81,15 +82,16 @@ func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.
 
 	gin.SetMode(gin.TestMode)
 
-	store, err := storage.NewLocalStore(t.TempDir())
+	baseDir := t.TempDir()
+	store, err := storage.NewLocalStore(filepath.Join(baseDir, "_store"))
 	if err != nil {
 		t.Fatalf("NewLocalStore() error = %v", err)
 	}
-	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	repo, err := sbomindex.NewLocalRepository(filepath.Join(baseDir, "_sbom_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
-	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	vulnRepo, err := vulnindex.NewLocalRepository(filepath.Join(baseDir, "_vulnerability_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
@@ -201,15 +203,16 @@ func TestGenerateScanSbomVulQueuesAsyncJobs(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 
-	store, err := storage.NewLocalStore(t.TempDir())
+	baseDir := t.TempDir()
+	store, err := storage.NewLocalStore(filepath.Join(baseDir, "_store"))
 	if err != nil {
 		t.Fatalf("NewLocalStore() error = %v", err)
 	}
-	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	repo, err := sbomindex.NewLocalRepository(filepath.Join(baseDir, "_sbom_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
-	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	vulnRepo, err := vulnindex.NewLocalRepository(filepath.Join(baseDir, "_vulnerability_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
@@ -277,15 +280,16 @@ func TestGetScanJobReturnsQueuedJob(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 
-	store, err := storage.NewLocalStore(t.TempDir())
+	baseDir := t.TempDir()
+	store, err := storage.NewLocalStore(filepath.Join(baseDir, "_store"))
 	if err != nil {
 		t.Fatalf("NewLocalStore() error = %v", err)
 	}
-	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	repo, err := sbomindex.NewLocalRepository(filepath.Join(baseDir, "_sbom_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
-	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	vulnRepo, err := vulnindex.NewLocalRepository(filepath.Join(baseDir, "_vulnerability_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
@@ -698,15 +702,16 @@ func TestListCatalogReturnsEntriesAndFilters(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 
-	store, err := storage.NewLocalStore(t.TempDir())
+	baseDir := t.TempDir()
+	store, err := storage.NewLocalStore(filepath.Join(baseDir, "_store"))
 	if err != nil {
 		t.Fatalf("NewLocalStore() error = %v", err)
 	}
-	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	repo, err := sbomindex.NewLocalRepository(filepath.Join(baseDir, "_sbom_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
-	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	vulnRepo, err := vulnindex.NewLocalRepository(filepath.Join(baseDir, "_vulnerability_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository() error = %v", err)
 	}
@@ -787,6 +792,77 @@ func TestListCatalogReturnsEntriesAndFilters(t *testing.T) {
 	}
 	if got, want := payload.Items[0].Repository, "index.docker.io/library/alpine"; got != want {
 		t.Fatalf("payload.Items[0].Repository = %q, want %q", got, want)
+	}
+}
+
+func TestListCatalogSupportsPagination(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	repo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+
+	for _, record := range []sbomindex.Record{
+		{OrgID: "demo-org", ImageID: "image-a", ImageName: "alpine:3.21", SourceFormat: sbomindex.FormatCycloneDX, UpdatedAt: time.Date(2026, 3, 13, 18, 0, 0, 0, time.UTC)},
+		{OrgID: "demo-org", ImageID: "image-b", ImageName: "alpine:3.20", SourceFormat: sbomindex.FormatCycloneDX, UpdatedAt: time.Date(2026, 3, 13, 17, 0, 0, 0, time.UTC)},
+		{OrgID: "demo-org", ImageID: "image-c", ImageName: "alpine:3.19", SourceFormat: sbomindex.FormatCycloneDX, UpdatedAt: time.Date(2026, 3, 13, 16, 0, 0, 0, time.UTC)},
+	} {
+		if _, err := repo.Save(context.Background(), record); err != nil {
+			t.Fatalf("repo.Save() error = %v", err)
+		}
+	}
+
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
+	router := gin.New()
+	router.GET("/api/v1/catalog", handler.ListCatalog)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?query=alpine&page=2&page_size=1", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var payload struct {
+		Count    int                 `json:"count"`
+		Total    int                 `json:"total"`
+		Page     int                 `json:"page"`
+		PageSize int                 `json:"page_size"`
+		HasMore  bool                `json:"has_more"`
+		Items    []ImageCatalogEntry `json:"items"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got, want := payload.Count, 1; got != want {
+		t.Fatalf("payload.Count = %d, want %d", got, want)
+	}
+	if got, want := payload.Total, 3; got != want {
+		t.Fatalf("payload.Total = %d, want %d", got, want)
+	}
+	if got, want := payload.Page, 2; got != want {
+		t.Fatalf("payload.Page = %d, want %d", got, want)
+	}
+	if got, want := payload.PageSize, 1; got != want {
+		t.Fatalf("payload.PageSize = %d, want %d", got, want)
+	}
+	if got, want := payload.HasMore, true; got != want {
+		t.Fatalf("payload.HasMore = %v, want %v", got, want)
+	}
+	if got, want := payload.Items[0].ImageID, "image-b"; got != want {
+		t.Fatalf("payload.Items[0].ImageID = %q, want %q", got, want)
 	}
 }
 

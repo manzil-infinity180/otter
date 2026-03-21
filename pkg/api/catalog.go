@@ -8,12 +8,12 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-containerregistry/pkg/name"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/storage"
@@ -62,6 +62,8 @@ type catalogFilters struct {
 	Query       string
 	Severity    string
 	SortBy      string
+	Page        int
+	PageSize    int
 	AllowedOrgs map[string]struct{}
 }
 
@@ -83,7 +85,7 @@ func (h *ScanHandler) ListCatalog(c *gin.Context) {
 		return
 	}
 
-	entries, err := h.buildCatalog(c.Request.Context(), filters)
+	entries, total, err := h.buildCatalog(c.Request.Context(), filters)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load catalog: %v", err)})
 		return
@@ -92,12 +94,18 @@ func (h *ScanHandler) ListCatalog(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"storage_backend": h.store.Backend(),
 		"count":           len(entries),
+		"total":           total,
+		"page":            filters.Page,
+		"page_size":       filters.PageSize,
+		"has_more":        filters.Page*filters.PageSize < total,
 		"items":           entries,
 		"filters": gin.H{
-			"org_id":   filters.OrgID,
-			"query":    filters.Query,
-			"severity": filters.Severity,
-			"sort":     filters.SortBy,
+			"org_id":    filters.OrgID,
+			"query":     filters.Query,
+			"severity":  filters.Severity,
+			"sort":      filters.SortBy,
+			"page":      filters.Page,
+			"page_size": filters.PageSize,
 		},
 	})
 }
@@ -136,7 +144,7 @@ func (h *ScanHandler) BrowseCatalog(c *gin.Context) {
 		return
 	}
 
-	entries, err := h.buildCatalog(c.Request.Context(), filters)
+	entries, total, err := h.buildCatalog(c.Request.Context(), filters)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "load catalog: %v", err)
 		return
@@ -146,9 +154,11 @@ func (h *ScanHandler) BrowseCatalog(c *gin.Context) {
 	data := struct {
 		Entries []ImageCatalogEntry
 		Filters catalogFilters
+		Total   int
 	}{
 		Entries: entries,
 		Filters: filters,
+		Total:   total,
 	}
 	if err := browseCatalogTemplate.Execute(&body, data); err != nil {
 		c.String(http.StatusInternalServerError, "render catalog: %v", err)
@@ -218,9 +228,11 @@ func (h *ScanHandler) BrowseImage(c *gin.Context) {
 
 func parseCatalogFilters(c *gin.Context) (catalogFilters, error) {
 	filters := catalogFilters{
-		OrgID:  strings.TrimSpace(c.Query("org_id")),
-		Query:  strings.TrimSpace(c.Query("query")),
-		SortBy: strings.TrimSpace(c.DefaultQuery("sort", "recent")),
+		OrgID:    strings.TrimSpace(c.Query("org_id")),
+		Query:    strings.TrimSpace(c.Query("query")),
+		SortBy:   strings.TrimSpace(c.DefaultQuery("sort", "recent")),
+		Page:     1,
+		PageSize: 20,
 	}
 	if filters.Query == "" {
 		filters.Query = strings.TrimSpace(c.Query("q"))
@@ -241,75 +253,75 @@ func parseCatalogFilters(c *gin.Context) (catalogFilters, error) {
 	default:
 		return catalogFilters{}, fmt.Errorf("unsupported sort %q", filters.SortBy)
 	}
+	if c.Query("page") != "" {
+		value, err := strconv.Atoi(strings.TrimSpace(c.Query("page")))
+		if err != nil || value <= 0 {
+			return catalogFilters{}, fmt.Errorf("page must be a positive integer")
+		}
+		filters.Page = value
+	}
+	if c.Query("page_size") != "" {
+		value, err := strconv.Atoi(strings.TrimSpace(c.Query("page_size")))
+		if err != nil || value <= 0 {
+			return catalogFilters{}, fmt.Errorf("page_size must be a positive integer")
+		}
+		if value > 100 {
+			value = 100
+		}
+		filters.PageSize = value
+	}
 
 	return filters, nil
 }
 
-func (h *ScanHandler) buildCatalog(ctx context.Context, filters catalogFilters) ([]ImageCatalogEntry, error) {
-	records, err := h.sbomIndex.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list sbom index records: %w", err)
+func (h *ScanHandler) buildCatalog(ctx context.Context, filters catalogFilters) ([]ImageCatalogEntry, int, error) {
+	query := sbomindex.CatalogQuery{
+		OrgID:    filters.OrgID,
+		Query:    filters.Query,
+		Severity: filters.Severity,
+		SortBy:   filters.SortBy,
+		Page:     filters.Page,
+		PageSize: filters.PageSize,
 	}
-
-	entries := make([]ImageCatalogEntry, len(records))
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.SetLimit(8)
-	for index, record := range records {
-		index := index
-		record := record
-		group.Go(func() error {
-			entry, err := h.buildCatalogEntry(groupCtx, record)
-			if err != nil {
-				return err
-			}
-			entries[index] = entry
-			return nil
-		})
-	}
-	if err := group.Wait(); err != nil {
-		return nil, err
-	}
-
-	filtered := make([]ImageCatalogEntry, 0, len(entries))
-	for _, entry := range entries {
-		if !matchesCatalogFilters(entry, filters) {
-			continue
+	if len(filters.AllowedOrgs) > 0 {
+		query.AllowedOrgs = make([]string, 0, len(filters.AllowedOrgs))
+		for orgID := range filters.AllowedOrgs {
+			query.AllowedOrgs = append(query.AllowedOrgs, orgID)
 		}
-		filtered = append(filtered, entry)
 	}
 
-	sortCatalogEntries(filtered, filters.SortBy)
-	return filtered, nil
+	page, err := h.sbomIndex.QueryCatalog(ctx, query)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query catalog records: %w", err)
+	}
+
+	entries := make([]ImageCatalogEntry, 0, len(page.Items))
+	for _, record := range page.Items {
+		entries = append(entries, buildImageCatalogEntry(record))
+	}
+
+	return entries, page.Total, nil
 }
 
-func (h *ScanHandler) buildCatalogEntry(ctx context.Context, record sbomindex.Record) (ImageCatalogEntry, error) {
+func buildImageCatalogEntry(record sbomindex.CatalogRecord) ImageCatalogEntry {
 	refParts := parseImageReference(record.ImageName)
-	vulnerabilityRecord, err := h.getExistingVulnerabilityRecord(ctx, record.OrgID, record.ImageID)
-	if err != nil {
-		return ImageCatalogEntry{}, fmt.Errorf("load vulnerability summary for %s/%s: %w", record.OrgID, record.ImageID, err)
-	}
-
 	entry := ImageCatalogEntry{
-		OrgID:          record.OrgID,
-		ImageID:        record.ImageID,
-		ImageName:      record.ImageName,
-		Registry:       refParts.Registry,
-		Platform:       record.Platform,
-		Repository:     refParts.Repository,
-		RepositoryPath: refParts.RepositoryPath,
-		Tag:            refParts.Tag,
-		Digest:         refParts.Digest,
-		PackageCount:   record.PackageCount,
-		LicenseSummary: record.LicenseSummary,
-		UpdatedAt:      record.UpdatedAt,
+		OrgID:                record.OrgID,
+		ImageID:              record.ImageID,
+		ImageName:            record.ImageName,
+		Registry:             refParts.Registry,
+		Platform:             record.Platform,
+		Repository:           refParts.Repository,
+		RepositoryPath:       refParts.RepositoryPath,
+		Tag:                  refParts.Tag,
+		Digest:               refParts.Digest,
+		PackageCount:         record.PackageCount,
+		LicenseSummary:       record.LicenseSummary,
+		VulnerabilitySummary: record.VulnerabilitySummary,
+		Scanners:             sortedSummaryKeys(record.VulnerabilitySummary.ByScanner),
+		UpdatedAt:            record.UpdatedAt,
 	}
-	if vulnerabilityRecord != nil {
-		entry.VulnerabilitySummary = vulnerabilityRecord.Summary
-		entry.Scanners = sortedSummaryKeys(vulnerabilityRecord.Summary.ByScanner)
-		entry.UpdatedAt = latestTimestamp(entry.UpdatedAt, vulnerabilityRecord.UpdatedAt)
-	}
-
-	return entry, nil
+	return entry
 }
 
 func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID string) (ImageOverview, error) {
@@ -318,9 +330,23 @@ func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID str
 		return ImageOverview{}, err
 	}
 
-	entry, err := h.buildCatalogEntry(ctx, record)
-	if err != nil {
-		return ImageOverview{}, err
+	entry := buildImageCatalogEntry(sbomindex.CatalogRecord{
+		OrgID:          record.OrgID,
+		ImageID:        record.ImageID,
+		ImageName:      record.ImageName,
+		RepositoryKey:  record.RepositoryKey,
+		Platform:       record.Platform,
+		SourceFormat:   record.SourceFormat,
+		PackageCount:   record.PackageCount,
+		LicenseSummary: record.LicenseSummary,
+		UpdatedAt:      record.UpdatedAt,
+	})
+	if vulnerabilityRecord, err := h.getExistingVulnerabilityRecord(ctx, record.OrgID, record.ImageID); err != nil {
+		return ImageOverview{}, fmt.Errorf("load vulnerability summary for %s/%s: %w", record.OrgID, record.ImageID, err)
+	} else if vulnerabilityRecord != nil {
+		entry.VulnerabilitySummary = vulnerabilityRecord.Summary
+		entry.Scanners = sortedSummaryKeys(vulnerabilityRecord.Summary.ByScanner)
+		entry.UpdatedAt = latestTimestamp(entry.UpdatedAt, vulnerabilityRecord.UpdatedAt)
 	}
 
 	prefix, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildImagePrefix()
@@ -336,42 +362,32 @@ func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID str
 		files = append(files, toObjectResponse(object))
 	}
 
-	records, err := h.sbomIndex.List(ctx)
+	repositoryKey := record.RepositoryKey
+	if repositoryKey == "" {
+		repositoryKey = entry.Repository
+	}
+	records, err := h.sbomIndex.ListRepositoryTags(ctx, sbomindex.RepositoryTagQuery{
+		OrgID:          orgID,
+		RepositoryKey:  repositoryKey,
+		ExcludeImageID: imageID,
+	})
 	if err != nil {
-		return ImageOverview{}, fmt.Errorf("list related sbom index records: %w", err)
+		return ImageOverview{}, fmt.Errorf("list related repository tags: %w", err)
 	}
 
 	tags := make([]ImageTagSummary, 0)
 	for _, candidate := range records {
-		if candidate.OrgID != orgID {
-			continue
-		}
-		if candidate.ImageID == imageID {
-			continue
-		}
 		candidateRef := parseImageReference(candidate.ImageName)
-		if candidateRef.Repository == "" || candidateRef.Repository != entry.Repository {
-			continue
-		}
-
-		vulnerabilityRecord, err := h.getExistingVulnerabilityRecord(ctx, candidate.OrgID, candidate.ImageID)
-		if err != nil {
-			return ImageOverview{}, fmt.Errorf("load related vulnerability summary for %s/%s: %w", candidate.OrgID, candidate.ImageID, err)
-		}
-
 		tag := ImageTagSummary{
-			OrgID:        candidate.OrgID,
-			ImageID:      candidate.ImageID,
-			ImageName:    candidate.ImageName,
-			Platform:     candidate.Platform,
-			Tag:          candidateRef.Tag,
-			Digest:       candidateRef.Digest,
-			PackageCount: candidate.PackageCount,
-			UpdatedAt:    candidate.UpdatedAt,
-		}
-		if vulnerabilityRecord != nil {
-			tag.VulnerabilitySummary = vulnerabilityRecord.Summary
-			tag.UpdatedAt = latestTimestamp(tag.UpdatedAt, vulnerabilityRecord.UpdatedAt)
+			OrgID:                candidate.OrgID,
+			ImageID:              candidate.ImageID,
+			ImageName:            candidate.ImageName,
+			Platform:             candidate.Platform,
+			Tag:                  candidateRef.Tag,
+			Digest:               candidateRef.Digest,
+			PackageCount:         candidate.PackageCount,
+			UpdatedAt:            candidate.UpdatedAt,
+			VulnerabilitySummary: candidate.VulnerabilitySummary,
 		}
 		tags = append(tags, tag)
 	}

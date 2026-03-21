@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -47,15 +48,16 @@ func (s stubComplianceAssessor) Assess(context.Context, compliance.Input) compli
 func TestWorkflowScanViewCompareExport(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	store, err := storage.NewLocalStore(t.TempDir())
+	baseDir := t.TempDir()
+	store, err := storage.NewLocalStore(filepath.Join(baseDir, "_store"))
 	if err != nil {
 		t.Fatalf("NewLocalStore() error = %v", err)
 	}
-	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	sbomRepo, err := sbomindex.NewLocalRepository(filepath.Join(baseDir, "_sbom_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository(sbom) error = %v", err)
 	}
-	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	vulnRepo, err := vulnindex.NewLocalRepository(filepath.Join(baseDir, "_vulnerability_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository(vuln) error = %v", err)
 	}
