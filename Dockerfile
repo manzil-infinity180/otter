@@ -24,6 +24,7 @@ RUN apk add --no-cache ca-certificates
 RUN addgroup -S otter && adduser -S -G otter otter && mkdir -p /app/data && chown -R otter:otter /app
 
 COPY --from=builder /app/otter /usr/local/bin/otter
+COPY --from=builder /app/db/migrations /app/db/migrations
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign

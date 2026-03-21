@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,6 +34,9 @@ func (k dockerConfigKeychain) Resolve(target authn.Resource) (authn.Authenticato
 func (k dockerConfigKeychain) ResolveContext(_ context.Context, target authn.Resource) (authn.Authenticator, error) {
 	cfg, err := loadDockerConfig(k.path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return authn.Anonymous, nil
+		}
 		return nil, err
 	}
 

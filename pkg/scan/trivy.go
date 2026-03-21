@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -54,7 +55,7 @@ func (s *TrivyScanner) Name() string {
 
 func (s *TrivyScanner) Scan(ctx context.Context, imageRef string, _ *sbom.SBOM) (ScannerReport, error) {
 	if s.serverURL == "" {
-		return ScannerReport{}, fmt.Errorf("trivy server URL is not configured")
+		return ScannerReport{}, NewScannerUnavailableError(s.Name(), "Trivy server URL is not configured", nil)
 	}
 
 	scanCtx := ctx
@@ -81,7 +82,13 @@ func (s *TrivyScanner) Scan(ctx context.Context, imageRef string, _ *sbom.SBOM) 
 		if message == "" {
 			message = strings.TrimSpace(string(stdout))
 		}
-		return ScannerReport{}, fmt.Errorf("run trivy client: %w: %s", err, message)
+		if errors.Is(err, exec.ErrNotFound) {
+			return ScannerReport{}, NewScannerUnavailableError(s.Name(), fmt.Sprintf("Trivy binary %q is not installed", s.binaryPath), err)
+		}
+		if message == "" {
+			message = err.Error()
+		}
+		return ScannerReport{}, NewScannerUnavailableError(s.Name(), fmt.Sprintf("Trivy scanner is unavailable: %s", message), err)
 	}
 
 	var report trivyScanReport
@@ -98,6 +105,7 @@ func (s *TrivyScanner) Scan(ctx context.Context, imageRef string, _ *sbom.SBOM) 
 
 	return ScannerReport{
 		Scanner:     s.Name(),
+		Status:      ScannerStatusCompleted,
 		ContentType: "application/json",
 		Document:    stdout,
 		Findings:    findings,

@@ -1,6 +1,7 @@
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "NEGLIGIBLE" | "UNKNOWN";
 export type ImageExportFormat = "cyclonedx" | "spdx" | "json" | "csv" | "sarif";
 export type ComplianceStatus = "pass" | "partial" | "fail" | "unavailable";
+export type ScanJobStatus = "pending" | "running" | "succeeded" | "failed";
 
 export interface LicenseSummaryEntry {
   license: string;
@@ -39,6 +40,47 @@ export interface CatalogResponse {
   storage_backend: string;
 }
 
+export interface ScanJobRequest {
+  org_id: string;
+  image_id: string;
+  image_name: string;
+  registry?: string;
+  source: string;
+  trigger: string;
+}
+
+export interface ScanJobResult {
+  org_id: string;
+  image_id: string;
+  image_name: string;
+  registry?: string;
+  scanners?: string[];
+  summary: VulnerabilitySummary;
+  completed_at: string;
+}
+
+export interface ScanJob {
+  id: string;
+  status: ScanJobStatus;
+  request: ScanJobRequest;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  error?: string;
+  result?: ScanJobResult;
+}
+
+export interface ScanAcceptedResponse {
+  message: string;
+  job: ScanJob;
+  status_url: string;
+}
+
+export interface ScanJobResponse {
+  job: ScanJob;
+  storage_backend: string;
+}
+
 export interface ScanFile {
   key: string;
   size: number;
@@ -58,6 +100,32 @@ export interface TagItem {
   package_count: number;
   vulnerability_summary: VulnerabilitySummary;
   updated_at: string;
+}
+
+export interface ImageTagListItem {
+  tag?: string;
+  digest?: string;
+  scanned: boolean;
+  current: boolean;
+  org_id?: string;
+  image_id?: string;
+  image_name?: string;
+  updated_at?: string;
+  vulnerability_summary?: VulnerabilitySummary;
+}
+
+export interface ImageTagsResponse {
+  org_id: string;
+  image_id: string;
+  image_name: string;
+  repository: string;
+  storage_backend: string;
+  query?: string;
+  page: number;
+  page_size: number;
+  total: number;
+  items: ImageTagListItem[];
+  remote_tag_error?: string;
 }
 
 export interface OverviewResponse extends CatalogItem {

@@ -1,8 +1,10 @@
 import { startTransition, useEffect, useState } from "react";
 import { BrowserRouter, Link, NavLink, Outlet, Route, Routes } from "react-router-dom";
 
+import { DocsPage } from "./pages/docs-page";
 import { DirectoryPage } from "./pages/directory-page";
 import { ImageDetailPage } from "./pages/image-detail-page";
+import { LandingPage } from "./pages/landing-page";
 
 function useThemeMode() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -52,7 +54,23 @@ function Layout() {
                   `rounded-full px-4 py-2 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
                 }
               >
+                Home
+              </NavLink>
+              <NavLink
+                to="/directory"
+                className={({ isActive }) =>
+                  `rounded-full px-4 py-2 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
+                }
+              >
                 Directory
+              </NavLink>
+              <NavLink
+                to="/docs"
+                className={({ isActive }) =>
+                  `rounded-full px-4 py-2 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
+                }
+              >
+                Docs
               </NavLink>
               <a
                 href="/browse"
@@ -84,7 +102,9 @@ export default function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={<DirectoryPage />} />
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/directory" element={<DirectoryPage />} />
+          <Route path="/docs" element={<DocsPage />} />
           <Route path="/images/:orgId/:imageId" element={<ImageDetailPage />} />
         </Route>
       </Routes>

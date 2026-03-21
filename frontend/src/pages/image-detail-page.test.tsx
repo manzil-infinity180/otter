@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -37,7 +37,6 @@ describe("ImageDetailPage", () => {
             image_id: "image-a",
             image_name: "alpine:3.20",
             registry: "index.docker.io",
-            platform: "linux/arm64",
             repository: "index.docker.io/library/alpine",
             repository_path: "library/alpine",
             tag: "3.20",
@@ -55,13 +54,32 @@ describe("ImageDetailPage", () => {
             updated_at: "2026-03-13T18:30:00Z",
             storage_backend: "local",
             dependency_roots: ["pkg:apk/alpine/busybox@1.0.0"],
-            files: [],
+            files: [
+              {
+                key: "otterxf/demo-org/image-a/sbom.json",
+                size: 128,
+                content_type: "application/json",
+                created_at: "2026-03-13T18:30:00Z",
+                backend: "local"
+              },
+              {
+                key: "otterxf/demo-org/image-a/grype-vulnerabilities.json",
+                size: 96,
+                content_type: "application/json",
+                created_at: "2026-03-13T18:30:00Z",
+                backend: "local",
+                metadata: {
+                  scanner: "grype",
+                  status: "unavailable",
+                  message: "Grype database is unavailable."
+                }
+              }
+            ],
             tags: [
               {
                 org_id: "demo-org",
                 image_id: "image-b",
                 image_name: "alpine:3.19",
-                platform: "linux/amd64",
                 tag: "3.19",
                 package_count: 10,
                 vulnerability_summary: {
@@ -99,6 +117,11 @@ describe("ImageDetailPage", () => {
                 severity: "CRITICAL",
                 package_name: "busybox",
                 package_version: "1.36.1",
+                package_type: "apk",
+                namespace: "alpine:3.20",
+                description: "Busybox overflow in ash parser.",
+                references: ["https://nvd.nist.gov/vuln/detail/CVE-2024-0001"],
+                cvss: [{ source: "nvd", score: 9.8, vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" }],
                 fix_version: "1.36.2",
                 scanners: ["grype"],
                 status: "affected",
@@ -248,6 +271,16 @@ describe("ImageDetailPage", () => {
         };
       }
 
+      if (url.includes("/api/v1/scans/demo-org/image-a/files/sbom.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            bomFormat: "CycloneDX",
+            metadata: { component: { name: "alpine" } }
+          })
+        };
+      }
+
       if (url.includes("/api/v1/catalog")) {
         return {
           ok: true,
@@ -280,7 +313,63 @@ describe("ImageDetailPage", () => {
         };
       }
 
-      if (url.includes("/api/v1/comparisons") || url.includes("/api/v1/compare")) {
+      if (url.includes("/api/v1/images/image-a/tags")) {
+        return {
+          ok: true,
+          json: async () => ({
+            org_id: "demo-org",
+            image_id: "image-a",
+            image_name: "alpine:3.20",
+            repository: "index.docker.io/library/alpine",
+            storage_backend: "local",
+            page: 1,
+            page_size: 12,
+            total: 3,
+            items: [
+              {
+                tag: "3.20",
+                scanned: true,
+                current: true,
+                org_id: "demo-org",
+                image_id: "image-a",
+                image_name: "alpine:3.20",
+                updated_at: "2026-03-13T18:30:00Z",
+                vulnerability_summary: {
+                  total: 2,
+                  by_severity: { CRITICAL: 1, HIGH: 1 },
+                  by_scanner: { grype: 2 },
+                  fixable: 1,
+                  unfixable: 1
+                }
+              },
+              {
+                tag: "3.19",
+                scanned: true,
+                current: false,
+                org_id: "demo-org",
+                image_id: "image-b",
+                image_name: "alpine:3.19",
+                updated_at: "2026-03-13T17:30:00Z",
+                vulnerability_summary: {
+                  total: 4,
+                  by_severity: { HIGH: 2 },
+                  by_scanner: { trivy: 4 },
+                  fixable: 4,
+                  unfixable: 0
+                }
+              },
+              {
+                tag: "3.18",
+                scanned: false,
+                current: false,
+                image_name: "index.docker.io/library/alpine:3.18"
+              }
+            ]
+          })
+        };
+      }
+
+      if (url.includes("/api/v1/comparisons")) {
         return {
           ok: true,
           json: async () => ({
@@ -328,14 +417,33 @@ describe("ImageDetailPage", () => {
     renderImagePage();
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "library/alpine" })).toBeInTheDocument());
-    expect(screen.getByText("platform linux/arm64")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
 
     await user.click(screen.getByRole("tab", { name: "Vulnerabilities" }));
 
     await waitFor(() => expect(screen.getByText("CVE-2024-0001")).toBeInTheDocument());
     expect(screen.getByRole("tab", { name: "Vulnerabilities" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("busybox 1.36.1")).toBeInTheDocument();
+    expect(screen.getByText("busybox")).toBeInTheDocument();
+    expect(screen.getByText("1.36.1")).toBeInTheDocument();
+    expect(screen.getByText(/Grype database is unavailable/)).toBeInTheDocument();
+  });
+
+  it("opens the vulnerability detail drawer from the CVE id", async () => {
+    const user = userEvent.setup();
+    renderImagePage();
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "library/alpine" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Vulnerabilities" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "CVE-2024-0001" })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "CVE-2024-0001" }));
+
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "CVE-2024-0001" })).toBeInTheDocument());
+    const drawer = screen.getByRole("dialog", { name: "CVE-2024-0001" });
+    expect(within(drawer).getByText("Busybox overflow in ash parser.")).toBeInTheDocument();
+    expect(within(drawer).getByText("Scanners and fixes")).toBeInTheDocument();
+    expect(within(drawer).getByText("CVSS")).toBeInTheDocument();
+    expect(within(drawer).getByText("References")).toBeInTheDocument();
   });
 
   it("renders the compliance dashboard in the overview tab", async () => {
@@ -381,7 +489,8 @@ describe("ImageDetailPage", () => {
     await user.click(screen.getByRole("tab", { name: "Tags" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Repository tags" })).toBeInTheDocument());
     expect(screen.getByText("alpine:3.19")).toBeInTheDocument();
-    expect(screen.getByText("linux/amd64")).toBeInTheDocument();
+    expect(screen.getByText("public only")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "scan" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "SBOM" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "SBOM package inventory" })).toBeInTheDocument());
@@ -404,5 +513,16 @@ describe("ImageDetailPage", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Advisories and VEX status" })).toBeInTheDocument());
     expect(screen.getByText("Patched by downstream backport.")).toBeInTheDocument();
     expect(screen.getByText("advisory.json")).toBeInTheDocument();
+  });
+
+  it("opens JSON artifacts in the in-app viewer", async () => {
+    const user = userEvent.setup();
+    renderImagePage();
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Open" }).length).toBeGreaterThan(0));
+    await user.click(screen.getAllByRole("button", { name: "Open" })[0]);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Artifact viewer" })).toBeInTheDocument());
+    expect(screen.getByText("Lazy tree viewer for large JSON artifacts")).toBeInTheDocument();
   });
 });

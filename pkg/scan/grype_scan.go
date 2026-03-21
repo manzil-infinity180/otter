@@ -30,7 +30,7 @@ func (s *GrypeVulnerabilityScanner) Name() string {
 func (s *GrypeVulnerabilityScanner) Scan(ctx context.Context, _ string, document *sbom.SBOM) (ScannerReport, error) {
 	scanner, err := NewScanner(s.options)
 	if err != nil {
-		return ScannerReport{}, fmt.Errorf("create grype scanner: %w", err)
+		return ScannerReport{}, NewScannerUnavailableError(s.Name(), fmt.Sprintf("Grype database is unavailable: %v", err), err)
 	}
 
 	syftPkgs := document.Artifacts.Packages.Sorted()
@@ -61,6 +61,7 @@ func (s *GrypeVulnerabilityScanner) Scan(ctx context.Context, _ string, document
 
 	return ScannerReport{
 		Scanner:     s.Name(),
+		Status:      ScannerStatusCompleted,
 		ContentType: "application/json",
 		Document:    rawDocument,
 		Findings:    findings,

@@ -1,0 +1,261 @@
+{
+  "project": "otter",
+  "version": "0.0.2",
+  "created": "2026-03-20",
+  "description": "Product requirements for Otter v0.0.2 - UI/UX improvements, universal scanning, and feature completeness",
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "JSON Viewer for Artifacts",
+      "priority": "high",
+      "status": "planned",
+      "description": "When a user clicks 'Open' on an artifact (sbom.json, vulnerabilities.json, etc.), show the JSON in a readable, formatted viewer instead of dumping raw JSON in the browser tab.",
+      "requirements": [
+        "Build an in-app JSON viewer component (collapsible tree, syntax highlighting, search)",
+        "Keep it simple and readable - inspired by jsonviewer.stack.hu but lighter",
+        "Support large files (1MB+ SBOMs) without freezing the UI",
+        "Open in a modal or dedicated route, not a new browser tab",
+        "Copy-to-clipboard button for the full JSON or selected nodes"
+      ],
+      "affected_files": [
+        "frontend/src/components/json-viewer.tsx",
+        "frontend/src/pages/image-detail-page.tsx"
+      ]
+    },
+    {
+      "id": "M2",
+      "title": "Fix Registry Name Overlap in Overview",
+      "priority": "high",
+      "status": "planned",
+      "description": "The registry name (e.g. 'index.docker.io') is not visible - it gets hidden under the next div. The scan summary layout with Registry/Repository cards overlaps on smaller screens.",
+      "requirements": [
+        "Fix the Overview tab scan summary grid so Registry and Repository values don't overflow",
+        "Ensure text truncation with tooltip on hover for long values",
+        "Test on 13-14 inch laptop screens (1366x768, 1440x900)",
+        "StatCard values should ellipsis-truncate rather than push layout"
+      ],
+      "affected_files": [
+        "frontend/src/components/stat-card.tsx",
+        "frontend/src/pages/image-detail-page.tsx"
+      ]
+    },
+    {
+      "id": "M3",
+      "title": "Universal Public Image Scanning",
+      "priority": "critical",
+      "status": "planned",
+      "description": "Users must be able to scan ANY public container image, not just the pre-seeded catalog. Add a scan input where users can type any image ref (e.g. 'manzilrahul/k8s-custom-controller', 'nginx:latest', 'ghcr.io/owner/repo:tag') and trigger a scan.",
+      "requirements": [
+        "Add a prominent 'Scan Image' input/button on the directory page",
+        "Accept any valid image reference (Docker Hub shorthand, GHCR, ECR public, Chainguard, etc.)",
+        "Support async scanning with progress indication (job status polling)",
+        "After scan completes, redirect to the image detail page",
+        "Show scan errors clearly (auth failures, image not found, timeout)",
+        "Rename 'Search repository, tag, digest, or image ID' to be clearly a filter/search for existing results, separate from the scan input"
+      ],
+      "affected_files": [
+        "frontend/src/pages/directory-page.tsx",
+        "frontend/src/components/scan-input.tsx",
+        "frontend/src/lib/api.ts"
+      ]
+    },
+    {
+      "id": "M4",
+      "title": "Comparison Target UX",
+      "priority": "medium",
+      "status": "planned",
+      "description": "The comparison tab says 'Choose another stored image' but it's unclear which images are available or what to compare against. Improve the comparison UX.",
+      "requirements": [
+        "Show a clear list of comparable images (same repository, different tags)",
+        "Pre-select the most logical comparison target (e.g. previous tag, 'latest' vs current)",
+        "If no comparison candidates exist, explain why and suggest scanning another tag first",
+        "Show a summary preview before running the comparison"
+      ],
+      "affected_files": [
+        "frontend/src/pages/image-detail-page.tsx"
+      ]
+    },
+    {
+      "id": "M5",
+      "title": "Fix Vulnerability Display",
+      "priority": "high",
+      "status": "planned",
+      "description": "Vulnerabilities tab shows 'No vulnerabilities matched the current filters' even when vulnerabilities exist. The severity filter defaults may be hiding results. Also grype-vulnerabilities.json is only 3 bytes suggesting the scanner returned empty results.",
+      "requirements": [
+        "Investigate why grype-vulnerabilities.json is 3 bytes (likely '[]' or '{}') - scanner may not be running correctly without binaries installed locally",
+        "Default filters should show ALL vulnerabilities, not pre-filter by severity",
+        "Show a clear message when scanner produced no results vs when filters hide results",
+        "Show scanner health status - indicate if grype/trivy binaries are available",
+        "Add a 'Reset filters' button"
+      ],
+      "affected_files": [
+        "frontend/src/pages/image-detail-page.tsx",
+        "pkg/scan/grype.go",
+        "pkg/scan/analyzer.go",
+        "pkg/api/scan.go"
+      ]
+    },
+    {
+      "id": "M6",
+      "title": "Responsive UI for Small Screens",
+      "priority": "high",
+      "status": "planned",
+      "description": "The UI breaks on 13-14 inch laptops. Package tables overflow, dependency trees go out of bounds, and the overall layout is too wide.",
+      "requirements": [
+        "Package table: add horizontal scroll, truncate long license lists with expand toggle",
+        "Dependency tree: constrain to container width, add horizontal scroll or collapse deeply nested nodes",
+        "StatCard grid: stack on smaller screens instead of 4-column",
+        "Tab sidebar: collapse to horizontal scroll on narrow viewports (already partially done)",
+        "Test all views at 1366x768 and 1440x900"
+      ],
+      "affected_files": [
+        "frontend/src/pages/image-detail-page.tsx",
+        "frontend/src/pages/directory-page.tsx",
+        "frontend/src/components/stat-card.tsx"
+      ]
+    },
+    {
+      "id": "M7",
+      "title": "Unified Image Version View",
+      "priority": "medium",
+      "status": "planned",
+      "description": "Alpine 3.19 and alpine:latest appear as separate entries in the directory. Users should see one entry per repository with version/tag selector inside the detail page.",
+      "requirements": [
+        "Group images by repository in the directory listing",
+        "Show the latest scan as the primary entry, with a tag count badge",
+        "Inside image detail, add a version/tag switcher (dropdown or tabs) to navigate between alpine:latest and alpine:3.19 without going back to the directory",
+        "The Tags tab already lists related tags - consider promoting this to the header area"
+      ],
+      "affected_files": [
+        "frontend/src/pages/directory-page.tsx",
+        "frontend/src/pages/image-detail-page.tsx",
+        "pkg/api/catalog.go"
+      ]
+    },
+    {
+      "id": "M8",
+      "title": "Attestation and Advisory Real Data",
+      "priority": "medium",
+      "status": "planned",
+      "description": "Attestation tab shows all zeros. Advisory tab shows no data. These features need to actually work for images that have attestations (e.g. chainguard images) and for VEX imports.",
+      "requirements": [
+        "Test attestation discovery with images that have cosign signatures (e.g. cgr.dev/chainguard/static)",
+        "Ensure cosign binary is available or show clear status when it's not",
+        "Add a 'Import VEX' button in the Advisories tab so users can upload OpenVEX documents",
+        "Show example/instructions when no attestations or advisories exist",
+        "Consider auto-discovering attestations during scan rather than requiring a separate API call"
+      ],
+      "affected_files": [
+        "frontend/src/pages/image-detail-page.tsx",
+        "pkg/attestation/discover.go",
+        "pkg/api/scan.go"
+      ]
+    },
+    {
+      "id": "M9",
+      "title": "Improve Directory Page UX",
+      "priority": "medium",
+      "status": "planned",
+      "description": "The directory page search label says 'Search repository, tag, digest, or image ID' which is confusing - users think it's for scanning new images. The page should clearly separate 'scan new' from 'filter existing'.",
+      "requirements": [
+        "Rename search to 'Filter catalog' or 'Find in catalog'",
+        "Add a hero-level 'Scan a new image' CTA with an image ref input",
+        "Show scan status for in-progress scans (the job queue already supports this)",
+        "Add empty state for first-time users with no scanned images explaining how to get started"
+      ],
+      "affected_files": [
+        "frontend/src/pages/directory-page.tsx"
+      ]
+    },
+    {
+      "id": "M10",
+      "title": "Scanner Health Dashboard",
+      "priority": "low",
+      "status": "planned",
+      "description": "Users have no visibility into whether scanners (grype, trivy, cosign) are available and working. Add a health/status indicator.",
+      "requirements": [
+        "Add a /api/v1/health or extend /healthz to report scanner binary availability",
+        "Show scanner status in the UI footer or settings area",
+        "Indicate in scan results which scanners actually ran vs which were unavailable",
+        "Show clear error when a scan produces no vulnerabilities because scanners aren't installed"
+      ],
+      "affected_files": [
+        "pkg/api/scan.go",
+        "pkg/scan/analyzer.go",
+        "frontend/src/App.tsx"
+      ]
+    }
+  ],
+  "bugs": [
+    {
+      "id": "B1",
+      "title": "scanners field null causes frontend crash",
+      "status": "fixed",
+      "fixed_in": "0.0.2-dev",
+      "description": "Backend returns null for scanners field when no vulnerability record exists. Frontend crashes with 'Cannot read properties of undefined (reading map)'.",
+      "fix": "Added ?? [] guards in directory-page.tsx and image-detail-page.tsx"
+    },
+    {
+      "id": "B2",
+      "title": "Dark mode input boxes invisible",
+      "status": "fixed",
+      "fixed_in": "0.0.2-dev",
+      "description": "Input fields use dark:bg-ink-950 but ink-950 was missing from tailwind config.",
+      "fix": "Added ink-950: '#0b1220' to tailwind.config.ts"
+    },
+    {
+      "id": "B3",
+      "title": "Advisories tab causes full screen blur",
+      "status": "fixed",
+      "fixed_in": "0.0.2-dev",
+      "description": "Clicking Advisories tab crashed due to null vex_documents, leaving only the backdrop-blur background visible.",
+      "fix": "Added null safety guards for vex_documents and vulnerability_summary"
+    },
+    {
+      "id": "B4",
+      "title": "Docker config missing breaks public image scans",
+      "status": "fixed",
+      "fixed_in": "0.0.2-dev",
+      "description": "Catalog scans fail in Docker container because ~/.docker/config.json doesn't exist. Public images should fall back to anonymous auth.",
+      "fix": "keychain.go now returns authn.Anonymous when config file is missing"
+    },
+    {
+      "id": "B5",
+      "title": "DB migrations not copied to Docker image",
+      "status": "fixed",
+      "fixed_in": "0.0.2-dev",
+      "description": "Dockerfile didn't COPY db/migrations/ to the final stage, causing postgres storage to fail on startup.",
+      "fix": "Added COPY --from=builder /app/db/migrations to Dockerfile"
+    },
+    {
+      "id": "B6",
+      "title": "grype-vulnerabilities.json is 3 bytes",
+      "status": "open",
+      "description": "The grype scanner appears to return empty results. Likely because the grype binary is not installed in the local dev environment. Need to surface this to the user."
+    },
+    {
+      "id": "B7",
+      "title": "Registry name overflow in Overview StatCard",
+      "status": "open",
+      "description": "Long registry names like 'index.docker.io' overflow the StatCard and hide behind adjacent elements on small screens."
+    },
+    {
+      "id": "B8",
+      "title": "Dependency tree overflows container on small screens",
+      "status": "open",
+      "description": "Nested dependency tree cards push beyond the container boundary on 13-14 inch laptop screens."
+    }
+  ],
+  "iteration_order": [
+    "M3 - Universal scanning (core value prop - users must be able to scan any image)",
+    "M5 - Fix vulnerability display (core feature broken)",
+    "M2 - Fix registry name overlap (quick UI fix)",
+    "M6 - Responsive UI (usability on real laptops)",
+    "M1 - JSON viewer for artifacts (better artifact exploration)",
+    "M7 - Unified image version view (reduce directory clutter)",
+    "M9 - Directory page UX (clearer scan vs filter separation)",
+    "M4 - Comparison target UX (guided comparison flow)",
+    "M8 - Attestation and advisory real data (feature completeness)",
+    "M10 - Scanner health dashboard (operational visibility)"
+  ]
+}
