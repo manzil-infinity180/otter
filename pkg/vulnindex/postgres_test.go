@@ -25,6 +25,7 @@ func TestPostgresRepositorySaveGetDelete(t *testing.T) {
 		OrgID:     "demo-org",
 		ImageID:   "demo-image",
 		ImageName: "alpine:latest",
+		Platform:  "linux/arm64",
 		Summary: Summary{
 			Total:      1,
 			BySeverity: map[string]int{"HIGH": 1},
@@ -60,11 +61,12 @@ func TestPostgresRepositorySaveGetDelete(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 INSERT INTO vulnerability_indexes (
-	org_id, image_id, image_name, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
+	org_id, image_id, image_name, platform, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
 )
-VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9)
+VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10)
 ON CONFLICT (org_id, image_id) DO UPDATE SET
 	image_name = EXCLUDED.image_name,
+	platform = EXCLUDED.platform,
 	summary = EXCLUDED.summary,
 	vulnerabilities = EXCLUDED.vulnerabilities,
 	fix_recommendations = EXCLUDED.fix_recommendations,
@@ -77,6 +79,7 @@ RETURNING updated_at;
 			record.OrgID,
 			record.ImageID,
 			record.ImageName,
+			record.Platform,
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
@@ -95,15 +98,16 @@ RETURNING updated_at;
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT image_name, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
+SELECT image_name, platform, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
 FROM vulnerability_indexes
 WHERE org_id = $1 AND image_id = $2;
 `)).
 		WithArgs(record.OrgID, record.ImageID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"image_name", "summary", "vulnerabilities", "fix_recommendations", "trend", "vex_documents", "updated_at",
+			"image_name", "platform", "summary", "vulnerabilities", "fix_recommendations", "trend", "vex_documents", "updated_at",
 		}).AddRow(
 			record.ImageName,
+			record.Platform,
 			`{"total":1,"by_severity":{"HIGH":1},"by_scanner":{"grype":1},"by_status":{"affected":1},"fixable":1,"unfixable":0}`,
 			`[{"id":"CVE-2024-0001","severity":"HIGH","package_name":"openssl","status":"affected","status_source":"scanner","scanners":["grype"],"first_seen_at":"2026-03-13T18:00:00Z","last_seen_at":"2026-03-13T18:00:00Z"}]`,
 			`[]`,
@@ -118,6 +122,9 @@ WHERE org_id = $1 AND image_id = $2;
 	}
 	if got.ImageName != "alpine:latest" || got.Summary.Total != 1 {
 		t.Fatalf("Get() = %#v", got)
+	}
+	if got.Platform != record.Platform {
+		t.Fatalf("Get() Platform = %q, want %q", got.Platform, record.Platform)
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM vulnerability_indexes WHERE org_id = $1 AND image_id = $2`)).
@@ -153,7 +160,7 @@ func TestPostgresRepositoryErrorPaths(t *testing.T) {
 
 	repo := newPostgresRepositoryWithDB(db)
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT image_name, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
+SELECT image_name, platform, summary, vulnerabilities, fix_recommendations, trend, vex_documents, updated_at
 FROM vulnerability_indexes
 WHERE org_id = $1 AND image_id = $2;
 `)).

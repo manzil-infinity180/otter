@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"reflect"
 	"regexp"
 	"testing"
 	"time"
@@ -23,38 +25,52 @@ func TestPostgresStorePutGetListDelete(t *testing.T) {
 	key := "otterxf/demo-org/demo-image/sbom.json"
 	now := time.Now().UTC()
 	payload := []byte(`{"bomFormat":"CycloneDX"}`)
+	metadata := map[string]string{
+		"image_name": "nginx:latest",
+	}
+	metadataPayload, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 INSERT INTO scan_artifacts (
-	key, org_id, image_id, filename, artifact_type, content_type, payload, size_bytes
+	key, org_id, image_id, filename, artifact_type, content_type, payload, size_bytes, metadata
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb)
 ON CONFLICT (key) DO UPDATE SET
 	content_type = EXCLUDED.content_type,
 	payload = EXCLUDED.payload,
 	size_bytes = EXCLUDED.size_bytes,
+	metadata = EXCLUDED.metadata,
 	updated_at = NOW()
 RETURNING created_at;
 `)).
-		WithArgs(key, "demo-org", "demo-image", "sbom.json", "sbom", "application/json", payload, len(payload)).
+		WithArgs(key, "demo-org", "demo-image", "sbom.json", "sbom", "application/json", payload, len(payload), metadataPayload).
 		WillReturnRows(sqlmock.NewRows([]string{"created_at"}).AddRow(now))
 
-	info, err := store.Put(context.Background(), key, payload, PutOptions{ContentType: "application/json"})
+	info, err := store.Put(context.Background(), key, payload, PutOptions{
+		ContentType: "application/json",
+		Metadata:    metadata,
+	})
 	if err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	if info.Key != key || info.Size != int64(len(payload)) {
 		t.Fatalf("Put() info = %#v", info)
 	}
+	if !reflect.DeepEqual(info.Metadata, metadata) {
+		t.Fatalf("Put() metadata = %#v, want %#v", info.Metadata, metadata)
+	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT content_type, payload, size_bytes, created_at
+SELECT content_type, payload, size_bytes, created_at, metadata
 FROM scan_artifacts
 WHERE key = $1;
 `)).
 		WithArgs(key).
-		WillReturnRows(sqlmock.NewRows([]string{"content_type", "payload", "size_bytes", "created_at"}).
-			AddRow("application/json", payload, len(payload), now))
+		WillReturnRows(sqlmock.NewRows([]string{"content_type", "payload", "size_bytes", "created_at", "metadata"}).
+			AddRow("application/json", payload, len(payload), now, metadataPayload))
 
 	object, err := store.Get(context.Background(), key)
 	if err != nil {
@@ -63,16 +79,19 @@ WHERE key = $1;
 	if string(object.Data) != string(payload) {
 		t.Fatalf("Get() payload = %s, want %s", object.Data, payload)
 	}
+	if !reflect.DeepEqual(object.Info.Metadata, metadata) {
+		t.Fatalf("Get() metadata = %#v, want %#v", object.Info.Metadata, metadata)
+	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-SELECT key, content_type, size_bytes, created_at
+SELECT key, content_type, size_bytes, created_at, metadata
 FROM scan_artifacts
 WHERE key LIKE $1
 ORDER BY key;
 `)).
 		WithArgs("otterxf/demo-org/demo-image/%").
-		WillReturnRows(sqlmock.NewRows([]string{"key", "content_type", "size_bytes", "created_at"}).
-			AddRow(key, "application/json", len(payload), now))
+		WillReturnRows(sqlmock.NewRows([]string{"key", "content_type", "size_bytes", "created_at", "metadata"}).
+			AddRow(key, "application/json", len(payload), now, metadataPayload))
 
 	objects, err := store.List(context.Background(), "otterxf/demo-org/demo-image/")
 	if err != nil {
@@ -80,6 +99,9 @@ ORDER BY key;
 	}
 	if len(objects) != 1 || objects[0].Key != key {
 		t.Fatalf("List() = %#v", objects)
+	}
+	if !reflect.DeepEqual(objects[0].Metadata, metadata) {
+		t.Fatalf("List() metadata = %#v, want %#v", objects[0].Metadata, metadata)
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM scan_artifacts WHERE key = $1`)).

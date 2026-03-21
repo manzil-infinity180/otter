@@ -130,10 +130,10 @@ func TestDiscovererVerificationAndClassificationHelpers(t *testing.T) {
 	}
 
 	outcome := discoverer.verify(context.Background(), true, "ghcr.io/demo/app@sha256:1234")
-	if got, want := outcome.Status, VerificationStatusInvalid; got != want {
+	if got, want := outcome.DefaultOutcome.Status, VerificationStatusInvalid; got != want {
 		t.Fatalf("verify() status = %q, want %q", got, want)
 	}
-	if got, want := outcome.Message, "verification failed"; got != want {
+	if got, want := outcome.DefaultOutcome.Message, "verification failed"; got != want {
 		t.Fatalf("verify() message = %q, want %q", got, want)
 	}
 
@@ -141,20 +141,33 @@ func TestDiscovererVerificationAndClassificationHelpers(t *testing.T) {
 		cfg:    Config{CosignBinary: "cosign"},
 		runner: stubRunner{err: exec.ErrNotFound},
 	}).verify(context.Background(), false, "ghcr.io/demo/app@sha256:1234")
-	if got, want := unverified.Status, VerificationStatusUnverified; got != want {
+	if got, want := unverified.DefaultOutcome.Status, VerificationStatusUnverified; got != want {
 		t.Fatalf("verify() missing cosign status = %q, want %q", got, want)
 	}
 
-	records := []Record{{Kind: KindSignature}, {Kind: KindAttestation, Signer: "existing"}}
+	records := []discoveredRecord{
+		{record: Record{Kind: KindSignature}, matcher: verificationMatcher{fingerprints: map[string]struct{}{"sig": {}}}},
+		{record: Record{Kind: KindAttestation, Signer: "existing"}, matcher: verificationMatcher{fingerprints: map[string]struct{}{"att": {}}}},
+	}
 	now := time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC)
-	applyVerification(records, verificationOutcome{
-		Status:    VerificationStatusValid,
-		Signer:    "signer@example.com",
-		Issuer:    "issuer",
-		Timestamp: &now,
+	applyVerification(records, verificationReport{
+		Entries: []verifiedEntry{{
+			matcher: verificationMatcher{fingerprints: map[string]struct{}{"sig": {}}},
+			outcome: verificationOutcome{
+				Status:    VerificationStatusValid,
+				Signer:    "signer@example.com",
+				Issuer:    "issuer",
+				Timestamp: &now,
+			},
+		}},
+		DefaultOutcome:  verificationOutcome{Status: VerificationStatusInvalid},
+		StrictUnmatched: true,
 	})
-	if records[0].Signer != "signer@example.com" || records[1].Signer != "existing" {
+	if records[0].record.Signer != "signer@example.com" || records[1].record.Signer != "existing" {
 		t.Fatalf("applyVerification() = %#v", records)
+	}
+	if records[1].record.VerificationStatus != VerificationStatusInvalid {
+		t.Fatalf("applyVerification() unmatched status = %q, want %q", records[1].record.VerificationStatus, VerificationStatusInvalid)
 	}
 
 	result := Result{
@@ -181,7 +194,7 @@ func TestDiscovererVerificationAndClassificationHelpers(t *testing.T) {
 			Subject: &v1.Descriptor{Digest: mustHash(t, "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")},
 		},
 	})
-	if got, want := record.Kind, KindAttestation; got != want {
+	if got, want := record.record.Kind, KindAttestation; got != want {
 		t.Fatalf("analyzeArtifact() kind = %q, want %q", got, want)
 	}
 	if got, want := classifyArtifact(Record{ArtifactType: "signature"}), KindSignature; got != want {
@@ -189,6 +202,26 @@ func TestDiscovererVerificationAndClassificationHelpers(t *testing.T) {
 	}
 	if got, want := inferredArtifactType(&v1.Manifest{Config: v1.Descriptor{MediaType: types.MediaType("application/vnd.example.config.v1+json")}}), "application/vnd.example.config.v1+json"; got != want {
 		t.Fatalf("inferredArtifactType() = %q, want %q", got, want)
+	}
+}
+
+func TestParseVerificationEntriesSupportsArrayAndStreamPayloads(t *testing.T) {
+	t.Parallel()
+
+	arrayEntries, err := parseVerificationEntries([]byte(`[{"critical":{"image":{"docker-manifest-digest":"sha256:1"}}}]`))
+	if err != nil {
+		t.Fatalf("parseVerificationEntries(array) error = %v", err)
+	}
+	if got, want := len(arrayEntries), 1; got != want {
+		t.Fatalf("len(arrayEntries) = %d, want %d", got, want)
+	}
+
+	streamEntries, err := parseVerificationEntries([]byte("{\"predicateType\":\"https://example.com/predicate/v1\"}\n{\"predicateType\":\"https://example.com/predicate/v2\"}\n"))
+	if err != nil {
+		t.Fatalf("parseVerificationEntries(stream) error = %v", err)
+	}
+	if got, want := len(streamEntries), 2; got != want {
+		t.Fatalf("len(streamEntries) = %d, want %d", got, want)
 	}
 }
 

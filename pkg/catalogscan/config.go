@@ -2,6 +2,7 @@ package catalogscan
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,11 +33,23 @@ type Config struct {
 	WorkerCount     int
 	QueueSize       int
 	JobHistoryLimit int
+	StateDir        string
+	RetryLimit      int
+	RetryBackoff    time.Duration
+	RetryBackoffMax time.Duration
 	OrgID           string
 	ImageRefs       []string
 }
 
 func ConfigFromEnv() Config {
+	workingDir, err := os.Getwd()
+	if err != nil {
+		workingDir = "."
+	}
+	dataDir := strings.TrimSpace(os.Getenv("OTTER_DATA_DIR"))
+	if dataDir == "" {
+		dataDir = filepath.Join(workingDir, "data")
+	}
 	cfg := Config{
 		Enabled:         envBool("OTTER_CATALOG_SCANNER_ENABLED", true),
 		Interval:        envDuration("OTTER_CATALOG_SCANNER_INTERVAL", 6*time.Hour),
@@ -44,6 +57,10 @@ func ConfigFromEnv() Config {
 		WorkerCount:     envInt("OTTER_CATALOG_SCANNER_WORKERS", 2),
 		QueueSize:       envInt("OTTER_CATALOG_SCANNER_QUEUE_SIZE", 32),
 		JobHistoryLimit: envInt("OTTER_CATALOG_SCANNER_JOB_HISTORY_LIMIT", 200),
+		StateDir:        strings.TrimSpace(os.Getenv("OTTER_CATALOG_SCANNER_STATE_DIR")),
+		RetryLimit:      envInt("OTTER_CATALOG_SCANNER_RETRY_LIMIT", 2),
+		RetryBackoff:    envDuration("OTTER_CATALOG_SCANNER_RETRY_BACKOFF", 5*time.Second),
+		RetryBackoffMax: envDuration("OTTER_CATALOG_SCANNER_RETRY_BACKOFF_MAX", time.Minute),
 		OrgID:           strings.TrimSpace(os.Getenv("OTTER_CATALOG_SCANNER_ORG_ID")),
 		ImageRefs:       parseImageRefs(os.Getenv("OTTER_CATALOG_SCANNER_IMAGES")),
 	}
@@ -64,6 +81,21 @@ func ConfigFromEnv() Config {
 	}
 	if cfg.JobHistoryLimit <= 0 {
 		cfg.JobHistoryLimit = 200
+	}
+	if cfg.StateDir == "" {
+		cfg.StateDir = filepath.Join(dataDir, "_catalog_scan_jobs")
+	}
+	if cfg.RetryLimit < 0 {
+		cfg.RetryLimit = 0
+	}
+	if cfg.RetryBackoff <= 0 {
+		cfg.RetryBackoff = 5 * time.Second
+	}
+	if cfg.RetryBackoffMax <= 0 {
+		cfg.RetryBackoffMax = time.Minute
+	}
+	if cfg.RetryBackoffMax < cfg.RetryBackoff {
+		cfg.RetryBackoffMax = cfg.RetryBackoff
 	}
 	if len(cfg.ImageRefs) == 0 {
 		cfg.ImageRefs = DefaultImageRefs()
@@ -89,6 +121,8 @@ func DefaultRequests(cfg Config) []Request {
 		if err != nil {
 			continue
 		}
+		request.Actor = "catalog-scheduler"
+		request.ActorType = "system"
 		requests = append(requests, request)
 	}
 	return requests

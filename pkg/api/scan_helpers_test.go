@@ -76,7 +76,7 @@ func TestExecuteCatalogScanAndHelperFallbacks(t *testing.T) {
 			ImageRef:                "alpine:latest",
 			SBOMDocument:            []byte(testCycloneDXDocument),
 			SBOMSPDXDocument:        []byte(testSPDXDocument),
-			SBOMData:                testSyftSBOM(),
+			SBOMData:                testSyftSBOMForPlatform("linux/arm64"),
 			CombinedVulnerabilities: []byte(`{"matches":[]}`),
 			CombinedReport:          testCombinedVulnerabilityReport(),
 			Summary:                 scan.VulnerabilitySummary{Total: 1, Fixable: 1},
@@ -101,6 +101,9 @@ func TestExecuteCatalogScanAndHelperFallbacks(t *testing.T) {
 	if got, want := len(result.Scanners), 1; got != want {
 		t.Fatalf("len(Scanners) = %d, want %d", got, want)
 	}
+	if got, want := result.Platform, "linux/arm64"; got != want {
+		t.Fatalf("Platform = %q, want %q", got, want)
+	}
 
 	legacyKey, err := ArtifactKeyBuilder{OrgID: "catalog", ImageID: "legacy-image"}.BuildSBOMKey()
 	if err != nil {
@@ -119,7 +122,7 @@ func TestExecuteCatalogScanAndHelperFallbacks(t *testing.T) {
 	}
 }
 
-func TestGetOrCreateIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t *testing.T) {
+func TestGetOrBuildIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t *testing.T) {
 	t.Parallel()
 
 	store, err := storage.NewLocalStore(t.TempDir())
@@ -142,16 +145,20 @@ func TestGetOrCreateIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t
 
 	handler := NewScanHandlerWithRegistry(store, sbomRepo, vulnRepo, stubAnalyzer{}, stubRegistryService{})
 
-	sbomRecord, err := handler.getOrCreateSBOMRecord(context.Background(), "demo-org", "demo-image", sbomindex.FormatCycloneDX, []byte(testCycloneDXDocument))
-	if err != nil {
-		t.Fatalf("getOrCreateSBOMRecord() error = %v", err)
-	}
 	sbomKey, err := ArtifactKeyBuilder{OrgID: "demo-org", ImageID: "demo-image"}.BuildSBOMKeyForFormat(sbomindex.FormatCycloneDX)
 	if err != nil {
 		t.Fatalf("BuildSBOMKeyForFormat() error = %v", err)
 	}
 	if _, err := store.Put(context.Background(), sbomKey, []byte(testCycloneDXDocument), storage.PutOptions{ContentType: "application/vnd.cyclonedx+json"}); err != nil {
 		t.Fatalf("store.Put(sbom) error = %v", err)
+	}
+	sbomObject, err := store.Get(context.Background(), sbomKey)
+	if err != nil {
+		t.Fatalf("store.Get(sbom) error = %v", err)
+	}
+	sbomRecord, err := handler.getOrBuildSBOMRecord(context.Background(), "demo-org", "demo-image", sbomindex.FormatCycloneDX, sbomObject)
+	if err != nil {
+		t.Fatalf("getOrBuildSBOMRecord() error = %v", err)
 	}
 	sbomRecord.ImageName = "alpine:latest"
 	if _, err := sbomRepo.Save(context.Background(), sbomRecord); err != nil {
@@ -173,9 +180,9 @@ func TestGetOrCreateIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t
 		t.Fatalf("store.Put(vulnerabilities) error = %v", err)
 	}
 
-	vulnRecord, err := handler.getOrCreateVulnerabilityRecord(context.Background(), "demo-org", "demo-image")
+	vulnRecord, err := handler.getOrBuildVulnerabilityRecord(context.Background(), "demo-org", "demo-image")
 	if err != nil {
-		t.Fatalf("getOrCreateVulnerabilityRecord() error = %v", err)
+		t.Fatalf("getOrBuildVulnerabilityRecord() error = %v", err)
 	}
 	if got, want := vulnRecord.Summary.Total, 1; got != want {
 		t.Fatalf("vulnerability total = %d, want %d", got, want)
@@ -203,11 +210,11 @@ func TestGetOrCreateIndexRecordsResolveStoredImageReferenceAndComparisonTarget(t
 	if _, err := sbomRepo.Save(context.Background(), secondRecord); err != nil {
 		t.Fatalf("sbomRepo.Save(secondRecord) error = %v", err)
 	}
-	if _, err := handler.resolveComparisonTarget(context.Background(), "alpine:latest", ""); !errors.Is(err, errComparisonTargetAmbiguous) {
+	if _, err := handler.resolveComparisonTarget(context.Background(), "alpine:latest", "", nil); !errors.Is(err, errComparisonTargetAmbiguous) {
 		t.Fatalf("resolveComparisonTarget() error = %v, want ambiguous", err)
 	}
 
-	comparisonTarget, err := handler.resolveComparisonTarget(context.Background(), "alpine:latest", "demo-org")
+	comparisonTarget, err := handler.resolveComparisonTarget(context.Background(), "alpine:latest", "demo-org", nil)
 	if err != nil {
 		t.Fatalf("resolveComparisonTarget(org-scoped) error = %v", err)
 	}
@@ -255,6 +262,51 @@ func TestResolveStoredImageReferenceFallsBackToArtifactMetadata(t *testing.T) {
 		},
 	}, sbomRepo, vulnRepo, stubAnalyzer{})
 
+	imageRef, err := handler.resolveStoredImageReference(context.Background(), "fallback-org", "fallback-image")
+	if err != nil {
+		t.Fatalf("resolveStoredImageReference() error = %v", err)
+	}
+	if got, want := imageRef, "nginx:latest"; got != want {
+		t.Fatalf("imageRef = %q, want %q", got, want)
+	}
+}
+
+func TestResolveStoredImageReferenceFallsBackToPersistedArtifactMetadata(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sbomRepo.Close() })
+
+	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	t.Cleanup(func() { _ = vulnRepo.Close() })
+
+	key, err := ArtifactKeyBuilder{OrgID: "fallback-org", ImageID: "fallback-image"}.BuildSBOMKey()
+	if err != nil {
+		t.Fatalf("BuildSBOMKey() error = %v", err)
+	}
+	if _, err := store.Put(context.Background(), key, []byte(testCycloneDXDocument), storage.PutOptions{
+		ContentType: "application/vnd.cyclonedx+json",
+		Metadata: map[string]string{
+			"image_name":           "nginx:latest",
+			"availability_message": "scanner unavailable",
+		},
+	}); err != nil {
+		t.Fatalf("store.Put() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
 	imageRef, err := handler.resolveStoredImageReference(context.Background(), "fallback-org", "fallback-image")
 	if err != nil {
 		t.Fatalf("resolveStoredImageReference() error = %v", err)
@@ -316,6 +368,23 @@ func TestRenderComparisonLookupErrorAndFilenameHelpers(t *testing.T) {
 	writeAttachment(c, "demo.json", "application/json", []byte(`{"ok":true}`))
 	if got, want := recorder.Header().Get("Content-Disposition"), `attachment; filename="demo.json"`; got != want {
 		t.Fatalf("Content-Disposition = %q, want %q", got, want)
+	}
+}
+
+func TestRenderScanExecutionErrorTreatsPolicyBlocksAsBadRequest(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+
+	NewScanHandler(nil, nil, nil, nil).renderScanExecutionError(c, &registry.PolicyError{
+		Registry: "127.0.0.1:5000",
+		Reason:   "host IP 127.0.0.1 is a loopback address",
+	})
+
+	if got, want := recorder.Code, http.StatusBadRequest; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, recorder.Body.String())
 	}
 }
 

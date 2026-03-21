@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
 )
@@ -27,13 +28,25 @@ const (
 	StatusFailed    = "failed"
 )
 
+type QueueStats struct {
+	Pending       int `json:"pending"`
+	Running       int `json:"running"`
+	Succeeded     int `json:"succeeded"`
+	Failed        int `json:"failed"`
+	QueueDepth    int `json:"queue_depth"`
+	ActiveTargets int `json:"active_targets"`
+}
+
 type Request struct {
 	OrgID     string `json:"org_id"`
 	ImageID   string `json:"image_id"`
 	ImageName string `json:"image_name"`
 	Registry  string `json:"registry,omitempty"`
+	Platform  string `json:"platform,omitempty"`
 	Source    string `json:"source"`
 	Trigger   string `json:"trigger"`
+	Actor     string `json:"actor,omitempty"`
+	ActorType string `json:"actor_type,omitempty"`
 }
 
 type Result struct {
@@ -41,20 +54,25 @@ type Result struct {
 	ImageID     string                    `json:"image_id"`
 	ImageName   string                    `json:"image_name"`
 	Registry    string                    `json:"registry,omitempty"`
+	Platform    string                    `json:"platform,omitempty"`
 	Scanners    []string                  `json:"scanners,omitempty"`
 	Summary     scan.VulnerabilitySummary `json:"summary"`
+	Policy      policy.Evaluation         `json:"policy"`
 	CompletedAt time.Time                 `json:"completed_at"`
 }
 
 type Job struct {
-	ID          string     `json:"id"`
-	Status      string     `json:"status"`
-	Request     Request    `json:"request"`
-	CreatedAt   time.Time  `json:"created_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	Result      *Result    `json:"result,omitempty"`
+	ID            string     `json:"id"`
+	Status        string     `json:"status"`
+	Request       Request    `json:"request"`
+	CreatedAt     time.Time  `json:"created_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	Attempts      int        `json:"attempts"`
+	MaxAttempts   int        `json:"max_attempts,omitempty"`
+	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	Result        *Result    `json:"result,omitempty"`
 }
 
 type Executor interface {

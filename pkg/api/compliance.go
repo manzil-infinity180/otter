@@ -38,6 +38,9 @@ func (h *ScanHandler) GetImageCompliance(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
 	response, err := h.buildImageCompliance(c.Request.Context(), orgID, imageID)
 	if err != nil {

@@ -30,6 +30,9 @@ func GetSource(ctx context.Context, input string) (source.Source, error) {
 	if registryOptions := RegistryOptionsFromContext(ctx); registryOptions != nil {
 		cfg = cfg.WithRegistryOptions(registryOptions)
 	}
+	if platform := PlatformFromContext(ctx); platform != nil {
+		cfg = cfg.WithPlatform(platform)
+	}
 
 	src, err := syft.GetSource(ctx, input, cfg)
 	if err != nil {

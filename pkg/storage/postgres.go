@@ -63,18 +63,23 @@ func (s *PostgresStore) Put(ctx context.Context, key string, data []byte, opts P
 		return ObjectInfo{}, errors.New("postgres storage only supports valid JSON payloads")
 	}
 	payload = append(payload[:0], data...)
+	metadataPayload, err := marshalMetadata(opts.Metadata)
+	if err != nil {
+		return ObjectInfo{}, err
+	}
 
 	artifactType := strings.TrimSuffix(parts.Filename, filepath.Ext(parts.Filename))
 
 	const query = `
 INSERT INTO scan_artifacts (
-	key, org_id, image_id, filename, artifact_type, content_type, payload, size_bytes
+	key, org_id, image_id, filename, artifact_type, content_type, payload, size_bytes, metadata
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb)
 ON CONFLICT (key) DO UPDATE SET
 	content_type = EXCLUDED.content_type,
 	payload = EXCLUDED.payload,
 	size_bytes = EXCLUDED.size_bytes,
+	metadata = EXCLUDED.metadata,
 	updated_at = NOW()
 RETURNING created_at;
 `
@@ -91,6 +96,7 @@ RETURNING created_at;
 		opts.ContentType,
 		payload,
 		len(data),
+		metadataPayload,
 	).Scan(&createdAt); err != nil {
 		return ObjectInfo{}, fmt.Errorf("upsert artifact %s: %w", key, err)
 	}
@@ -101,7 +107,7 @@ RETURNING created_at;
 		ContentType: opts.ContentType,
 		CreatedAt:   createdAt.Time.UTC(),
 		Backend:     s.Backend(),
-		Metadata:    opts.Metadata,
+		Metadata:    cloneMetadata(opts.Metadata),
 	}, nil
 }
 
@@ -111,7 +117,7 @@ func (s *PostgresStore) Get(ctx context.Context, key string) (Object, error) {
 	}
 
 	const query = `
-SELECT content_type, payload, size_bytes, created_at
+SELECT content_type, payload, size_bytes, created_at, metadata
 FROM scan_artifacts
 WHERE key = $1;
 `
@@ -121,12 +127,17 @@ WHERE key = $1;
 		payload     []byte
 		size        int64
 		createdAt   sql.NullTime
+		metadataRaw []byte
 	)
-	if err := s.db.QueryRowContext(ctx, query, key).Scan(&contentType, &payload, &size, &createdAt); err != nil {
+	if err := s.db.QueryRowContext(ctx, query, key).Scan(&contentType, &payload, &size, &createdAt, &metadataRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Object{}, ErrNotFound
 		}
 		return Object{}, fmt.Errorf("get artifact %s: %w", key, err)
+	}
+	metadata, err := unmarshalMetadata(metadataRaw)
+	if err != nil {
+		return Object{}, fmt.Errorf("decode artifact metadata %s: %w", key, err)
 	}
 
 	return Object{
@@ -136,6 +147,7 @@ WHERE key = $1;
 			ContentType: contentType,
 			CreatedAt:   createdAt.Time.UTC(),
 			Backend:     s.Backend(),
+			Metadata:    metadata,
 		},
 		Data: payload,
 	}, nil
@@ -147,7 +159,7 @@ func (s *PostgresStore) List(ctx context.Context, prefix string) ([]ObjectInfo, 
 	}
 
 	const query = `
-SELECT key, content_type, size_bytes, created_at
+SELECT key, content_type, size_bytes, created_at, metadata
 FROM scan_artifacts
 WHERE key LIKE $1
 ORDER BY key;
@@ -164,12 +176,17 @@ ORDER BY key;
 		var (
 			info      ObjectInfo
 			createdAt sql.NullTime
+			metadata  []byte
 		)
-		if err := rows.Scan(&info.Key, &info.ContentType, &info.Size, &createdAt); err != nil {
+		if err := rows.Scan(&info.Key, &info.ContentType, &info.Size, &createdAt, &metadata); err != nil {
 			return nil, fmt.Errorf("scan artifact row: %w", err)
 		}
 		info.CreatedAt = createdAt.Time.UTC()
 		info.Backend = s.Backend()
+		info.Metadata, err = unmarshalMetadata(metadata)
+		if err != nil {
+			return nil, fmt.Errorf("decode artifact metadata %s: %w", info.Key, err)
+		}
 		objects = append(objects, info)
 	}
 	if err := rows.Err(); err != nil {

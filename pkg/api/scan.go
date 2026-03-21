@@ -17,9 +17,11 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/otterXf/otter/pkg/attestation"
+	"github.com/otterXf/otter/pkg/audit"
 	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compare"
 	"github.com/otterXf/otter/pkg/compliance"
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/registry"
 	reportexport "github.com/otterXf/otter/pkg/reportexport"
 	"github.com/otterXf/otter/pkg/sbomindex"
@@ -36,11 +38,19 @@ const (
 
 type ImageGeneratePayload struct {
 	Arch      string `json:"arch"`
+	Platform  string `json:"platform"`
 	ImageName string `json:"image_name"`
 	Registry  string `json:"registry"`
 	OrgID     string `json:"org_id"`
 	ImageID   string `json:"image_id"`
 	Async     bool   `json:"async"`
+}
+
+type ComparisonPayload struct {
+	Image1 string `json:"image1"`
+	Image2 string `json:"image2"`
+	Org1   string `json:"org1"`
+	Org2   string `json:"org2"`
 }
 
 type ScanHandler struct {
@@ -52,11 +62,14 @@ type ScanHandler struct {
 	compliance compliance.Assessor
 	registry   registry.Service
 	jobs       scanJobQueue
+	auditor    audit.Recorder
+	policy     *policy.Engine
 }
 
 type scanJobQueue interface {
 	Enqueue(catalogscan.Request) (catalogscan.Job, error)
 	Get(string) (catalogscan.Job, bool)
+	Stats() catalogscan.QueueStats
 }
 
 type ScanSBOMSummary struct {
@@ -79,6 +92,7 @@ type ScanExecutionResult struct {
 	ImageID         string                    `json:"image_id"`
 	ImageName       string                    `json:"image_name"`
 	Registry        string                    `json:"registry"`
+	Platform        string                    `json:"platform,omitempty"`
 	RegistryAuth    string                    `json:"registry_auth"`
 	StorageBackend  string                    `json:"storage_backend"`
 	Summary         scan.VulnerabilitySummary `json:"summary"`
@@ -86,6 +100,7 @@ type ScanExecutionResult struct {
 	Vulnerabilities ScanVulnerabilitySummary  `json:"vulnerabilities"`
 	Scanners        []string                  `json:"scanners,omitempty"`
 	Files           map[string]ObjectResponse `json:"files,omitempty"`
+	Policy          policy.Evaluation         `json:"policy"`
 }
 
 func NewScanHandler(store storage.Store, sbomIndex sbomindex.Repository, vulnIndex vulnindex.Repository, analyzer scan.ImageAnalyzer) *ScanHandler {
@@ -104,6 +119,8 @@ func NewScanHandlerWithRegistry(store storage.Store, sbomIndex sbomindex.Reposit
 		attestor:   attestation.NewDiscoverer(attestation.ConfigFromEnv()),
 		compliance: compliance.NewService(compliance.ConfigFromEnv()),
 		registry:   registryService,
+		auditor:    audit.NewNopRecorder(),
+		policy:     policy.NewDisabledEngine(),
 	}
 }
 
@@ -117,6 +134,23 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	orgID, imageID, err := normalizeArtifactIDs(payload.OrgID, payload.ImageID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
+	payload.OrgID = orgID
+	payload.ImageID = imageID
+	requestedPlatform, err := normalizeRequestedPlatform(payload.Arch, payload.Platform)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	payload.Platform = platformString(requestedPlatform)
+	actor := auditActorFromContext(c)
 
 	if payload.Async || strings.EqualFold(c.Query("async"), "true") {
 		request, err := catalogscan.NewRequest(payload.OrgID, payload.ImageID, payload.ImageName, payload.Registry, catalogscan.SourceAPI, catalogscan.TriggerManual)
@@ -124,6 +158,9 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		request.Platform = payload.Platform
+		request.Actor = actor.ID
+		request.ActorType = actor.Type
 		if h.jobs == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan job queue is not configured"})
 			return
@@ -137,6 +174,24 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
+		h.recordAuditEvent(c.Request.Context(), audit.Event{
+			Action:     "scan.enqueued",
+			Outcome:    "queued",
+			Actor:      actor.ID,
+			ActorType:  actor.Type,
+			OrgID:      request.OrgID,
+			Target:     imageAuditTarget(request.OrgID, request.ImageID),
+			TargetType: "image",
+			Metadata: map[string]any{
+				"image_name": request.ImageName,
+				"registry":   request.Registry,
+				"job_id":     job.ID,
+				"mode":       "async",
+				"platform":   request.Platform,
+				"source":     request.Source,
+				"trigger":    request.Trigger,
+			},
+		})
 		c.JSON(http.StatusAccepted, gin.H{
 			"message":    "scan queued successfully",
 			"job":        job,
@@ -147,7 +202,52 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 
 	result, err := h.executeScan(c.Request.Context(), payload)
 	if err != nil {
+		h.recordAuditEvent(c.Request.Context(), audit.Event{
+			Action:     "scan.completed",
+			Outcome:    "failed",
+			Actor:      actor.ID,
+			ActorType:  actor.Type,
+			OrgID:      payload.OrgID,
+			Target:     imageAuditTarget(payload.OrgID, payload.ImageID),
+			TargetType: "image",
+			Error:      err.Error(),
+			Metadata: map[string]any{
+				"image_name": payload.ImageName,
+				"registry":   payload.Registry,
+				"mode":       "sync",
+				"platform":   payload.Platform,
+				"source":     catalogscan.SourceAPI,
+				"trigger":    catalogscan.TriggerManual,
+			},
+		})
 		h.renderScanExecutionError(c, err)
+		return
+	}
+	h.recordAuditEvent(c.Request.Context(), audit.Event{
+		Action:     "scan.completed",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      result.OrgID,
+		Target:     imageAuditTarget(result.OrgID, result.ImageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"image_name":      result.ImageName,
+			"registry":        result.Registry,
+			"registry_auth":   result.RegistryAuth,
+			"storage_backend": result.StorageBackend,
+			"summary_total":   result.Summary.Total,
+			"scanners":        append([]string(nil), result.Scanners...),
+			"mode":            "sync",
+			"platform":        result.Platform,
+			"source":          catalogscan.SourceAPI,
+			"trigger":         catalogscan.TriggerManual,
+			"policy_mode":     result.Policy.Mode,
+			"policy_status":   result.Policy.Status,
+		},
+	})
+	if result.Policy.Mode == policy.ModeEnforce && !result.Policy.Allowed {
+		c.JSON(http.StatusConflict, result)
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -170,33 +270,83 @@ func (h *ScanHandler) GetScanJob(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scan job not found"})
 		return
 	}
+	if !authorizeOrgRequest(c, job.Request.OrgID) {
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"job":             job,
+		"queue":           h.jobs.Stats(),
 		"storage_backend": h.store.Backend(),
 	})
 }
 
 func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Request) (catalogscan.Result, error) {
+	actor := auditActorFromRequest(req)
 	result, err := h.executeScan(ctx, ImageGeneratePayload{
 		ImageName: req.ImageName,
 		Registry:  req.Registry,
 		OrgID:     req.OrgID,
 		ImageID:   req.ImageID,
+		Platform:  req.Platform,
 	})
 	if err != nil {
+		h.recordAuditEvent(ctx, audit.Event{
+			Action:     "scan.completed",
+			Outcome:    "failed",
+			Actor:      actor.ID,
+			ActorType:  actor.Type,
+			OrgID:      req.OrgID,
+			Target:     imageAuditTarget(req.OrgID, req.ImageID),
+			TargetType: "image",
+			Error:      err.Error(),
+			Metadata: map[string]any{
+				"image_name": req.ImageName,
+				"registry":   req.Registry,
+				"mode":       "async",
+				"platform":   req.Platform,
+				"source":     req.Source,
+				"trigger":    req.Trigger,
+			},
+		})
 		return catalogscan.Result{}, err
 	}
 
-	return catalogscan.Result{
+	catalogResult := catalogscan.Result{
 		OrgID:       result.OrgID,
 		ImageID:     result.ImageID,
 		ImageName:   result.ImageName,
 		Registry:    result.Registry,
+		Platform:    result.Platform,
 		Scanners:    append([]string(nil), result.Scanners...),
 		Summary:     result.Summary,
+		Policy:      result.Policy,
 		CompletedAt: time.Now().UTC(),
-	}, nil
+	}
+	h.recordAuditEvent(ctx, audit.Event{
+		Action:     "scan.completed",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      catalogResult.OrgID,
+		Target:     imageAuditTarget(catalogResult.OrgID, catalogResult.ImageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"image_name":      catalogResult.ImageName,
+			"registry":        catalogResult.Registry,
+			"summary_total":   catalogResult.Summary.Total,
+			"scanners":        append([]string(nil), catalogResult.Scanners...),
+			"mode":            "async",
+			"platform":        catalogResult.Platform,
+			"source":          req.Source,
+			"trigger":         req.Trigger,
+			"storage_backend": h.store.Backend(),
+			"policy_mode":     result.Policy.Mode,
+			"policy_status":   result.Policy.Status,
+		},
+	})
+
+	return catalogResult, nil
 }
 
 func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayload) (ScanExecutionResult, error) {
@@ -215,20 +365,31 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
 
+	requestedPlatform, err := normalizeRequestedPlatform(payload.Arch, payload.Platform)
+	if err != nil {
+		return ScanExecutionResult{}, err
+	}
+
 	imageAccess, err := h.registry.PrepareImage(ctx, payload.ImageName)
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("prepare image pull: %w", err)
 	}
 	ctx = scan.ContextWithRegistryOptions(ctx, imageAccess.RegistryOptions)
+	ctx = scan.ContextWithPlatform(ctx, requestedPlatform)
 
 	result, err := h.analyzer.Analyze(ctx, payload.ImageName)
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("analyze image: %w", err)
 	}
+	resolvedPlatform := resolvedPlatformFromSBOM(result.SBOMData)
+	if resolvedPlatform == "" {
+		resolvedPlatform = platformString(requestedPlatform)
+	}
 	record, err := sbomindex.BuildRecordFromSyft(orgID, imageID, payload.ImageName, result.SBOMData)
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("index sbom: %w", err)
 	}
+	record.Platform = resolvedPlatform
 	existingVulnerabilities, err := h.getExistingVulnerabilityRecord(ctx, orgID, imageID)
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("load vulnerability history: %w", err)
@@ -237,6 +398,7 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 	if err != nil {
 		return ScanExecutionResult{}, fmt.Errorf("index vulnerabilities: %w", err)
 	}
+	vulnerabilityRecord.Platform = resolvedPlatform
 
 	keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
 	sbomKey, err := keyBuilder.BuildSBOMKey()
@@ -264,50 +426,61 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		Metadata     map[string]string
 	}
 
+	artifactMetadata := func(values map[string]string) map[string]string {
+		metadata := make(map[string]string, len(values)+1)
+		for key, value := range values {
+			metadata[key] = value
+		}
+		if resolvedPlatform != "" {
+			metadata["platform"] = resolvedPlatform
+		}
+		return metadata
+	}
+
 	uploads := []artifactUpload{
 		{
 			ResponseName: "sbom",
 			Key:          sbomKey,
 			Data:         result.SBOMDocument,
 			ContentType:  "application/vnd.cyclonedx+json",
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "sbom",
 				"format":     sbomindex.FormatCycloneDX,
 				"image_name": payload.ImageName,
-			},
+			}),
 		},
 		{
 			ResponseName: "sbom_cyclonedx",
 			Key:          cycloneDXKey,
 			Data:         result.SBOMDocument,
 			ContentType:  "application/vnd.cyclonedx+json",
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "sbom",
 				"format":     sbomindex.FormatCycloneDX,
 				"image_name": payload.ImageName,
-			},
+			}),
 		},
 		{
 			ResponseName: "sbom_spdx",
 			Key:          spdxKey,
 			Data:         result.SBOMSPDXDocument,
 			ContentType:  "application/spdx+json",
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "sbom",
 				"format":     sbomindex.FormatSPDX,
 				"image_name": payload.ImageName,
-			},
+			}),
 		},
 		{
 			ResponseName: "vulnerabilities",
 			Key:          vulnerabilityKey,
 			Data:         result.CombinedVulnerabilities,
 			ContentType:  "application/json",
-			Metadata: map[string]string{
+			Metadata: artifactMetadata(map[string]string{
 				"artifact":   "vulnerabilities",
 				"scanner":    "combined",
 				"image_name": payload.ImageName,
-			},
+			}),
 		},
 	}
 	for _, report := range result.ScannerReports {
@@ -324,14 +497,14 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		if strings.TrimSpace(report.Message) != "" {
 			metadata["message"] = report.Message
 		}
-		uploads = append(uploads, artifactUpload{
-			ResponseName: scannerResponseKey(report.Scanner),
-			Key:          key,
-			Data:         report.Document,
-			ContentType:  report.ContentType,
-			Metadata:     metadata,
-		})
-	}
+			uploads = append(uploads, artifactUpload{
+				ResponseName: scannerResponseKey(report.Scanner),
+				Key:          key,
+				Data:         report.Document,
+				ContentType:  report.ContentType,
+				Metadata:     artifactMetadata(metadata),
+			})
+		}
 
 	storedFiles := make(map[string]ObjectResponse, len(uploads))
 	storedKeys := make([]string, 0, len(uploads))
@@ -391,6 +564,7 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		ImageID:        imageID,
 		ImageName:      payload.ImageName,
 		Registry:       imageAccess.Registry,
+		Platform:       resolvedPlatform,
 		RegistryAuth:   imageAccess.AuthSource,
 		StorageBackend: h.store.Backend(),
 		Summary:        result.Summary,
@@ -408,11 +582,15 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		},
 		Scanners: scanners,
 		Files:    storedFiles,
+		Policy:   h.evaluatePolicy(ctx, orgID, imageID, payload.ImageName, &vulnerabilityRecord, nil, nil),
 	}, nil
 }
 
 func (h *ScanHandler) renderScanExecutionError(c *gin.Context, err error) {
+	var policyErr *registry.PolicyError
 	switch {
+	case errors.As(err, &policyErr):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, context.DeadlineExceeded):
 		c.JSON(http.StatusGatewayTimeout, gin.H{"error": err.Error()})
 	case strings.Contains(err.Error(), "prepare image pull:"):
@@ -428,6 +606,9 @@ func (h *ScanHandler) GetImageScans(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Param("org_id"), c.Param("image_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -466,6 +647,9 @@ func (h *ScanHandler) DeleteImageScansHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
 	prefix, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildImagePrefix()
 	if err != nil {
@@ -494,6 +678,20 @@ func (h *ScanHandler) DeleteImageScansHandler(c *gin.Context) {
 		return
 	}
 
+	actor := auditActorFromContext(c)
+	h.recordAuditEvent(c.Request.Context(), audit.Event{
+		Action:     "scan.deleted",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      orgID,
+		Target:     imageAuditTarget(orgID, imageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"deleted_objects": len(objects),
+			"storage_backend": h.store.Backend(),
+		},
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"message":         "Scans deleted successfully",
 		"org_id":          orgID,
@@ -507,6 +705,9 @@ func (h *ScanHandler) DownloadScanFile(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Param("org_id"), c.Param("image_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -546,6 +747,9 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
 	format, err := normalizeImageExportFormat(c.Query("format"))
 	if err != nil {
@@ -555,6 +759,11 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 
 	switch format {
 	case sbomindex.FormatCycloneDX, sbomindex.FormatSPDX:
+		record, recordErr := h.loadPolicyVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+		if recordErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load policy export context: %v", recordErr)})
+			return
+		}
 		keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
 		object, err := h.getSBOMArtifact(c.Request.Context(), keyBuilder, format)
 		if err != nil {
@@ -575,10 +784,16 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 		if contentType == "" {
 			contentType = "application/json"
 		}
+		imageName := strings.TrimSpace(object.Info.Metadata["image_name"])
+		if imageName == "" {
+			imageName, _ = h.resolveStoredImageReference(c.Request.Context(), orgID, imageID)
+		}
+		policyEvaluation := h.evaluatePolicy(c.Request.Context(), orgID, imageID, imageName, record, nil, nil)
+		writePolicyHeaders(c.Writer.Header(), policyEvaluation)
 		writeAttachment(c, filename, contentType, object.Data)
 		return
 	case reportexport.FormatCSV, reportexport.FormatJSON, reportexport.FormatSARIF:
-		record, err := h.getOrCreateVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+		record, err := h.getOrBuildVulnerabilityRecord(c.Request.Context(), orgID, imageID)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability report not found"})
@@ -587,6 +802,7 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load vulnerability export: %v", err)})
 			return
 		}
+		policyEvaluation := h.evaluatePolicy(c.Request.Context(), orgID, imageID, record.ImageName, &record, nil, nil)
 
 		var (
 			document    []byte
@@ -594,13 +810,13 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 		)
 		switch format {
 		case reportexport.FormatCSV:
-			document, err = reportexport.MarshalVulnerabilitiesCSV(record)
+			document, err = reportexport.MarshalVulnerabilitiesCSV(record, &policyEvaluation)
 			contentType = "text/csv; charset=utf-8"
 		case reportexport.FormatSARIF:
-			document, err = reportexport.MarshalVulnerabilitiesSARIF(record)
+			document, err = reportexport.MarshalVulnerabilitiesSARIF(record, &policyEvaluation)
 			contentType = "application/sarif+json"
 		default:
-			document, err = reportexport.MarshalVulnerabilitiesJSON(record)
+			document, err = reportexport.MarshalVulnerabilitiesJSON(record, &policyEvaluation)
 			contentType = "application/json"
 		}
 		if err != nil {
@@ -613,6 +829,7 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		writePolicyHeaders(c.Writer.Header(), policyEvaluation)
 		writeAttachment(c, filename, contentType, document)
 		return
 	default:
@@ -637,6 +854,14 @@ func (h *ScanHandler) ExportComparison(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load comparison export: %v", err)})
 		return
 	}
+	var report compare.Report
+	if err := json.Unmarshal(object.Data, &report); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("decode comparison report: %v", err)})
+		return
+	}
+	if !authorizeComparisonReport(c, report) {
+		return
+	}
 
 	filename, err := buildComparisonExportFilename(comparisonID)
 	if err != nil {
@@ -654,6 +879,9 @@ func (h *ScanHandler) GetImageSBOM(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -674,7 +902,7 @@ func (h *ScanHandler) GetImageSBOM(c *gin.Context) {
 		return
 	}
 
-	record, err := h.getOrCreateSBOMRecord(c.Request.Context(), orgID, imageID, format, object.Data)
+	record, err := h.getOrBuildSBOMRecord(c.Request.Context(), orgID, imageID, format, object)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load sbom index: %v", err)})
 		return
@@ -697,7 +925,60 @@ func (h *ScanHandler) GetImageSBOM(c *gin.Context) {
 		"dependency_roots": record.DependencyRoots,
 		"dependency_tree":  record.DependencyTree,
 		"document":         json.RawMessage(object.Data),
-		"updated_at":       record.UpdatedAt,
+		"policy": func() policy.Evaluation {
+			vulnerabilities, err := h.loadPolicyVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+			if err != nil {
+				return h.evaluatePolicy(c.Request.Context(), orgID, imageID, record.ImageName, nil, nil, err)
+			}
+			return h.evaluatePolicy(c.Request.Context(), orgID, imageID, record.ImageName, vulnerabilities, nil, nil)
+		}(),
+		"updated_at": record.UpdatedAt,
+	})
+}
+
+func (h *ScanHandler) RepairImageIndexes(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
+
+	sbomRecord, sbomStatus, err := h.repairSBOMIndex(c.Request.Context(), orgID, imageID)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) && !errors.Is(err, sbomindex.ErrNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repair sbom index: %v", err)})
+		return
+	}
+
+	vulnerabilityRecord, vulnerabilityStatus, err := h.repairVulnerabilityIndex(c.Request.Context(), orgID, imageID)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) && !errors.Is(err, vulnindex.ErrNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("repair vulnerability index: %v", err)})
+		return
+	}
+
+	if sbomStatus == "missing" && vulnerabilityStatus == "missing" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "stored indexes could not be repaired from existing artifacts"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "image indexes repaired",
+		"org_id":          orgID,
+		"image_id":        imageID,
+		"storage_backend": h.store.Backend(),
+		"sbom_index": gin.H{
+			"status":        sbomStatus,
+			"source_format": sbomRecord.SourceFormat,
+			"package_count": sbomRecord.PackageCount,
+			"updated_at":    sbomRecord.UpdatedAt,
+		},
+		"vulnerability_index": gin.H{
+			"status":              vulnerabilityStatus,
+			"vulnerability_count": len(vulnerabilityRecord.Vulnerabilities),
+			"updated_at":          vulnerabilityRecord.UpdatedAt,
+		},
 	})
 }
 
@@ -705,6 +986,9 @@ func (h *ScanHandler) ImportImageSBOM(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -803,6 +1087,24 @@ func (h *ScanHandler) ImportImageSBOM(c *gin.Context) {
 		return
 	}
 
+	actor := auditActorFromContext(c)
+	h.recordAuditEvent(c.Request.Context(), audit.Event{
+		Action:     "sbom.imported",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      orgID,
+		Target:     imageAuditTarget(orgID, imageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"format":           format,
+			"filename":         header.Filename,
+			"image_name":       imageName,
+			"package_count":    record.PackageCount,
+			"storage_backend":  h.store.Backend(),
+			"dependency_roots": append([]string(nil), record.DependencyRoots...),
+		},
+	})
 	c.JSON(http.StatusCreated, gin.H{
 		"message":          "SBOM imported successfully",
 		"org_id":           orgID,
@@ -821,8 +1123,11 @@ func (h *ScanHandler) GetImageVulnerabilities(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
 
-	record, err := h.getOrCreateVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+	record, err := h.getOrBuildVulnerabilityRecord(c.Request.Context(), orgID, imageID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "vulnerability report not found"})
@@ -851,6 +1156,7 @@ func (h *ScanHandler) GetImageVulnerabilities(c *gin.Context) {
 		"vulnerabilities":     filtered.Vulnerabilities,
 		"trend":               filtered.Trend,
 		"vex_documents":       filtered.VEXDocuments,
+		"policy":              h.evaluatePolicy(c.Request.Context(), orgID, imageID, record.ImageName, &record, nil, nil),
 		"updated_at":          filtered.UpdatedAt,
 	}
 	if c.Query("severity") != "" || c.Query("status") != "" {
@@ -864,6 +1170,9 @@ func (h *ScanHandler) GetImageAttestations(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -893,73 +1202,39 @@ func (h *ScanHandler) GetImageAttestations(c *gin.Context) {
 		"summary":         result.Summary,
 		"signatures":      result.Signatures,
 		"attestations":    result.Attestations,
-		"updated_at":      result.UpdatedAt,
+		"policy": func() policy.Evaluation {
+			vulnerabilities, err := h.loadPolicyVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+			if err != nil {
+				return h.evaluatePolicy(c.Request.Context(), orgID, imageID, imageRef, nil, &result, err)
+			}
+			return h.evaluatePolicy(c.Request.Context(), orgID, imageID, imageRef, vulnerabilities, &result, nil)
+		}(),
+		"updated_at": result.UpdatedAt,
 	})
 }
 
 func (h *ScanHandler) CompareImages(c *gin.Context) {
-	image1Ref := strings.TrimSpace(c.Query("image1"))
-	image2Ref := strings.TrimSpace(c.Query("image2"))
-	if image1Ref == "" || image2Ref == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "image1 and image2 are required"})
-		return
+	payload := ComparisonPayload{
+		Image1: strings.TrimSpace(c.Query("image1")),
+		Image2: strings.TrimSpace(c.Query("image2")),
+		Org1:   strings.TrimSpace(c.Query("org1")),
+		Org2:   strings.TrimSpace(c.Query("org2")),
 	}
 
-	target1, err := h.resolveComparisonTarget(c.Request.Context(), image1Ref, strings.TrimSpace(c.Query("org1")))
-	if err != nil {
-		h.renderComparisonLookupError(c, "image1", err)
-		return
+	if err := h.respondComparison(c, payload, false); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
-	target2, err := h.resolveComparisonTarget(c.Request.Context(), image2Ref, strings.TrimSpace(c.Query("org2")))
-	if err != nil {
-		h.renderComparisonLookupError(c, "image2", err)
-		return
-	}
+}
 
-	report, err := compare.BuildReport(compare.Inputs{
-		Image1:           target1.SBOM,
-		Image2:           target2.SBOM,
-		Vulnerabilities1: target1.Vulnerabilities,
-		Vulnerabilities2: target2.Vulnerabilities,
-		CycloneDX1:       target1.CycloneDXDocument,
-		CycloneDX2:       target2.CycloneDXDocument,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison: %v", err)})
+func (h *ScanHandler) CreateComparison(c *gin.Context) {
+	var payload ComparisonPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	document, err := compare.MarshalReport(report)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("marshal comparison: %v", err)})
-		return
+	if err := h.respondComparison(c, payload, true); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}
-
-	key, err := BuildComparisonKey(report.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison key: %v", err)})
-		return
-	}
-
-	info, err := h.store.Put(c.Request.Context(), key, document, storage.PutOptions{
-		ContentType: "application/json",
-		Metadata: map[string]string{
-			"artifact": "comparison",
-			"image1":   target1.SBOM.ImageName,
-			"image2":   target2.SBOM.ImageName,
-		},
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store comparison: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"comparison_id":   report.ID,
-		"storage_backend": h.store.Backend(),
-		"comparison_file": toObjectResponse(info),
-		"comparison":      report,
-	})
 }
 
 func (h *ScanHandler) GetStoredComparison(c *gin.Context) {
@@ -985,6 +1260,9 @@ func (h *ScanHandler) GetStoredComparison(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("decode comparison report: %v", err)})
 		return
 	}
+	if !authorizeComparisonReport(c, report) {
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"comparison_id":   comparisonID,
@@ -998,6 +1276,9 @@ func (h *ScanHandler) ImportImageVEX(c *gin.Context) {
 	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
 		return
 	}
 
@@ -1067,6 +1348,23 @@ func (h *ScanHandler) ImportImageVEX(c *gin.Context) {
 		return
 	}
 
+	actor := auditActorFromContext(c)
+	h.recordAuditEvent(c.Request.Context(), audit.Event{
+		Action:     "vex.imported",
+		Outcome:    "succeeded",
+		Actor:      actor.ID,
+		ActorType:  actor.Type,
+		OrgID:      orgID,
+		Target:     imageAuditTarget(orgID, imageID),
+		TargetType: "image",
+		Metadata: map[string]any{
+			"document_id":         vexDocument.DocumentID,
+			"filename":            header.Filename,
+			"image_name":          updatedRecord.ImageName,
+			"storage_backend":     h.store.Backend(),
+			"vulnerability_count": len(updatedRecord.Vulnerabilities),
+		},
+	})
 	c.JSON(http.StatusCreated, gin.H{
 		"message":             "VEX imported successfully",
 		"org_id":              orgID,
@@ -1099,7 +1397,7 @@ func (h *ScanHandler) getSBOMArtifact(ctx context.Context, keyBuilder ArtifactKe
 	return storage.Object{}, err
 }
 
-func (h *ScanHandler) getOrCreateSBOMRecord(ctx context.Context, orgID, imageID, format string, document []byte) (sbomindex.Record, error) {
+func (h *ScanHandler) getOrBuildSBOMRecord(ctx context.Context, orgID, imageID, format string, object storage.Object) (sbomindex.Record, error) {
 	record, err := h.sbomIndex.Get(ctx, orgID, imageID)
 	if err == nil {
 		return record, nil
@@ -1108,14 +1406,10 @@ func (h *ScanHandler) getOrCreateSBOMRecord(ctx context.Context, orgID, imageID,
 		return sbomindex.Record{}, err
 	}
 
-	record, err = sbomindex.BuildRecordFromDocument(orgID, imageID, "", format, document)
-	if err != nil {
-		return sbomindex.Record{}, err
-	}
-	return h.sbomIndex.Save(ctx, record)
+	return h.buildSBOMRecordFromArtifact(ctx, orgID, imageID, format, object)
 }
 
-func (h *ScanHandler) getOrCreateVulnerabilityRecord(ctx context.Context, orgID, imageID string) (vulnindex.Record, error) {
+func (h *ScanHandler) getOrBuildVulnerabilityRecord(ctx context.Context, orgID, imageID string) (vulnindex.Record, error) {
 	record, err := h.vulnIndex.Get(ctx, orgID, imageID)
 	if err == nil {
 		return record, nil
@@ -1133,11 +1427,7 @@ func (h *ScanHandler) getOrCreateVulnerabilityRecord(ctx context.Context, orgID,
 		return vulnindex.Record{}, err
 	}
 
-	record, err = vulnindex.BuildRecordFromDocument(orgID, imageID, "", object.Data, nil, vulnindex.BuildOptions{})
-	if err != nil {
-		return vulnindex.Record{}, err
-	}
-	return h.vulnIndex.Save(ctx, record)
+	return h.buildVulnerabilityRecordFromArtifact(ctx, orgID, imageID, object)
 }
 
 func (h *ScanHandler) getExistingVulnerabilityRecord(ctx context.Context, orgID, imageID string) (*vulnindex.Record, error) {
@@ -1149,6 +1439,120 @@ func (h *ScanHandler) getExistingVulnerabilityRecord(ctx context.Context, orgID,
 		return nil, nil
 	}
 	return nil, err
+}
+
+func (h *ScanHandler) getExistingSBOMRecord(ctx context.Context, orgID, imageID string) (*sbomindex.Record, error) {
+	record, err := h.sbomIndex.Get(ctx, orgID, imageID)
+	if err == nil {
+		return &record, nil
+	}
+	if errors.Is(err, sbomindex.ErrNotFound) {
+		return nil, nil
+	}
+	return nil, err
+}
+
+func (h *ScanHandler) buildSBOMRecordFromArtifact(ctx context.Context, orgID, imageID, format string, object storage.Object) (sbomindex.Record, error) {
+	imageName := strings.TrimSpace(object.Info.Metadata["image_name"])
+	if imageName == "" {
+		record, err := h.getExistingVulnerabilityRecord(ctx, orgID, imageID)
+		if err != nil {
+			return sbomindex.Record{}, err
+		}
+		if record != nil {
+			imageName = record.ImageName
+		}
+	}
+
+	record, err := sbomindex.BuildRecordFromDocument(orgID, imageID, imageName, format, object.Data)
+	if err != nil {
+		return sbomindex.Record{}, err
+	}
+	if platform := strings.TrimSpace(object.Info.Metadata["platform"]); platform != "" {
+		record.Platform = platform
+	}
+	return record, nil
+}
+
+func (h *ScanHandler) buildVulnerabilityRecordFromArtifact(ctx context.Context, orgID, imageID string, object storage.Object) (vulnindex.Record, error) {
+	imageName := strings.TrimSpace(object.Info.Metadata["image_name"])
+	if imageName == "" {
+		record, err := h.getExistingSBOMRecord(ctx, orgID, imageID)
+		if err != nil {
+			return vulnindex.Record{}, err
+		}
+		if record != nil {
+			imageName = record.ImageName
+		}
+	}
+
+	record, err := vulnindex.BuildRecordFromDocument(orgID, imageID, imageName, object.Data, nil, vulnindex.BuildOptions{})
+	if err != nil {
+		return vulnindex.Record{}, err
+	}
+	if platform := strings.TrimSpace(object.Info.Metadata["platform"]); platform != "" {
+		record.Platform = platform
+	}
+	return record, nil
+}
+
+func (h *ScanHandler) repairSBOMIndex(ctx context.Context, orgID, imageID string) (sbomindex.Record, string, error) {
+	record, err := h.sbomIndex.Get(ctx, orgID, imageID)
+	if err == nil {
+		return record, "present", nil
+	}
+	if !errors.Is(err, sbomindex.ErrNotFound) {
+		return sbomindex.Record{}, "", err
+	}
+
+	keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
+	for _, format := range []string{sbomindex.FormatCycloneDX, sbomindex.FormatSPDX} {
+		object, err := h.getSBOMArtifact(ctx, keyBuilder, format)
+		switch {
+		case err == nil:
+			record, err := h.buildSBOMRecordFromArtifact(ctx, orgID, imageID, format, object)
+			if err != nil {
+				return sbomindex.Record{}, "", err
+			}
+			record, err = h.sbomIndex.Save(ctx, record)
+			return record, "repaired", err
+		case errors.Is(err, storage.ErrNotFound):
+			continue
+		default:
+			return sbomindex.Record{}, "", err
+		}
+	}
+
+	return sbomindex.Record{}, "missing", storage.ErrNotFound
+}
+
+func (h *ScanHandler) repairVulnerabilityIndex(ctx context.Context, orgID, imageID string) (vulnindex.Record, string, error) {
+	record, err := h.vulnIndex.Get(ctx, orgID, imageID)
+	if err == nil {
+		return record, "present", nil
+	}
+	if !errors.Is(err, vulnindex.ErrNotFound) {
+		return vulnindex.Record{}, "", err
+	}
+
+	key, err := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}.BuildVulnerabilityKey()
+	if err != nil {
+		return vulnindex.Record{}, "", err
+	}
+	object, err := h.store.Get(ctx, key)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return vulnindex.Record{}, "missing", err
+		}
+		return vulnindex.Record{}, "", err
+	}
+
+	record, err = h.buildVulnerabilityRecordFromArtifact(ctx, orgID, imageID, object)
+	if err != nil {
+		return vulnindex.Record{}, "", err
+	}
+	record, err = h.vulnIndex.Save(ctx, record)
+	return record, "repaired", err
 }
 
 func (h *ScanHandler) resolveStoredImageReference(ctx context.Context, orgID, imageID string) (string, error) {
@@ -1210,7 +1614,7 @@ type comparisonTarget struct {
 var errComparisonTargetAmbiguous = errors.New("comparison target is ambiguous")
 var errComparisonTargetNotFound = errors.New("comparison target not found")
 
-func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, orgID string) (comparisonTarget, error) {
+func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, orgID string, allowedOrgs map[string]struct{}) (comparisonTarget, error) {
 	if err := validateImageReference(imageName); err != nil {
 		return comparisonTarget{}, err
 	}
@@ -1227,9 +1631,15 @@ func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, or
 
 	filtered := make([]sbomindex.Record, 0, len(records))
 	for _, record := range records {
-		if orgID == "" || record.OrgID == orgID {
-			filtered = append(filtered, record)
+		if orgID != "" && record.OrgID != orgID {
+			continue
 		}
+		if len(allowedOrgs) > 0 {
+			if _, ok := allowedOrgs[record.OrgID]; !ok {
+				continue
+			}
+		}
+		filtered = append(filtered, record)
 	}
 	if len(filtered) == 0 {
 		return comparisonTarget{}, errComparisonTargetNotFound
@@ -1245,7 +1655,7 @@ func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, or
 		return comparisonTarget{}, err
 	}
 
-	vulnerabilities, err := h.getOrCreateVulnerabilityRecord(ctx, record.OrgID, record.ImageID)
+	vulnerabilities, err := h.getOrBuildVulnerabilityRecord(ctx, record.OrgID, record.ImageID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
 			vulnerabilities = vulnindex.Record{
@@ -1268,6 +1678,87 @@ func (h *ScanHandler) resolveComparisonTarget(ctx context.Context, imageName, or
 		Vulnerabilities:   vulnerabilities,
 		CycloneDXDocument: object.Data,
 	}, nil
+}
+
+func (h *ScanHandler) respondComparison(c *gin.Context, payload ComparisonPayload, persist bool) error {
+	payload.Image1 = strings.TrimSpace(payload.Image1)
+	payload.Image2 = strings.TrimSpace(payload.Image2)
+	payload.Org1 = strings.TrimSpace(payload.Org1)
+	payload.Org2 = strings.TrimSpace(payload.Org2)
+
+	if payload.Image1 == "" || payload.Image2 == "" {
+		return errors.New("image1 and image2 are required")
+	}
+	if payload.Org1 != "" && !authorizeOrgRequest(c, payload.Org1) {
+		return nil
+	}
+	if payload.Org2 != "" && !authorizeOrgRequest(c, payload.Org2) {
+		return nil
+	}
+	allowedOrgs := authorizedOrgSet(c)
+
+	target1, err := h.resolveComparisonTarget(c.Request.Context(), payload.Image1, payload.Org1, allowedOrgs)
+	if err != nil {
+		h.renderComparisonLookupError(c, "image1", err)
+		return nil
+	}
+	target2, err := h.resolveComparisonTarget(c.Request.Context(), payload.Image2, payload.Org2, allowedOrgs)
+	if err != nil {
+		h.renderComparisonLookupError(c, "image2", err)
+		return nil
+	}
+
+	report, err := compare.BuildReport(compare.Inputs{
+		Image1:           target1.SBOM,
+		Image2:           target2.SBOM,
+		Vulnerabilities1: target1.Vulnerabilities,
+		Vulnerabilities2: target2.Vulnerabilities,
+		CycloneDX1:       target1.CycloneDXDocument,
+		CycloneDX2:       target2.CycloneDXDocument,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison: %v", err)})
+		return nil
+	}
+
+	response := gin.H{
+		"comparison_id":   report.ID,
+		"storage_backend": h.store.Backend(),
+		"comparison":      report,
+	}
+	if !persist {
+		c.JSON(http.StatusOK, response)
+		return nil
+	}
+
+	document, err := compare.MarshalReport(report)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("marshal comparison: %v", err)})
+		return nil
+	}
+
+	key, err := BuildComparisonKey(report.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison key: %v", err)})
+		return nil
+	}
+
+	info, err := h.store.Put(c.Request.Context(), key, document, storage.PutOptions{
+		ContentType: "application/json",
+		Metadata: map[string]string{
+			"artifact": "comparison",
+			"image1":   target1.SBOM.ImageName,
+			"image2":   target2.SBOM.ImageName,
+		},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("store comparison: %v", err)})
+		return nil
+	}
+
+	response["comparison_file"] = toObjectResponse(info)
+	c.JSON(http.StatusOK, response)
+	return nil
 }
 
 func (h *ScanHandler) renderComparisonLookupError(c *gin.Context, field string, err error) {

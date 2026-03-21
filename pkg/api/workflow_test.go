@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -47,15 +48,16 @@ func (s stubComplianceAssessor) Assess(context.Context, compliance.Input) compli
 func TestWorkflowScanViewCompareExport(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	store, err := storage.NewLocalStore(t.TempDir())
+	baseDir := t.TempDir()
+	store, err := storage.NewLocalStore(filepath.Join(baseDir, "_store"))
 	if err != nil {
 		t.Fatalf("NewLocalStore() error = %v", err)
 	}
-	sbomRepo, err := sbomindex.NewLocalRepository(t.TempDir())
+	sbomRepo, err := sbomindex.NewLocalRepository(filepath.Join(baseDir, "_sbom_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository(sbom) error = %v", err)
 	}
-	vulnRepo, err := vulnindex.NewLocalRepository(t.TempDir())
+	vulnRepo, err := vulnindex.NewLocalRepository(filepath.Join(baseDir, "_vulnerability_index"))
 	if err != nil {
 		t.Fatalf("NewLocalRepository(vuln) error = %v", err)
 	}
@@ -239,6 +241,17 @@ func TestWorkflowScanViewCompareExport(t *testing.T) {
 	}
 
 	storedCompareResp := performRequest(router, http.MethodGet, "/api/v1/comparisons/"+comparison.ComparisonID, nil, nil)
+	mustStatus(t, storedCompareResp, http.StatusNotFound)
+
+	createCompareResp := performJSONRequest(router, http.MethodPost, "/api/v1/comparisons", ComparisonPayload{
+		Image1: "alpine:3.20",
+		Image2: "alpine:3.19",
+		Org1:   "demo-org",
+		Org2:   "demo-org",
+	})
+	mustStatus(t, createCompareResp, http.StatusOK)
+
+	storedCompareResp = performRequest(router, http.MethodGet, "/api/v1/comparisons/"+comparison.ComparisonID, nil, nil)
 	mustStatus(t, storedCompareResp, http.StatusOK)
 
 	exportCompareResp := performRequest(router, http.MethodGet, "/api/v1/comparisons/"+comparison.ComparisonID+"/export", nil, nil)
@@ -276,6 +289,7 @@ func registerWorkflowRoutes(router *gin.Engine, handler *ScanHandler) {
 	router.GET("/api/v1/images/:id/compliance", handler.GetImageCompliance)
 	router.GET("/api/v1/images/:id/export", handler.ExportImage)
 	router.GET("/api/v1/compare", handler.CompareImages)
+	router.POST("/api/v1/comparisons", handler.CreateComparison)
 	router.GET("/api/v1/comparisons/:id", handler.GetStoredComparison)
 	router.GET("/api/v1/comparisons/:id/export", handler.ExportComparison)
 	router.GET("/browse", handler.BrowseCatalog)

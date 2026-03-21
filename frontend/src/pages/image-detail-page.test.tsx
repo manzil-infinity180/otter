@@ -369,7 +369,7 @@ describe("ImageDetailPage", () => {
         };
       }
 
-      if (url.includes("/api/v1/compare")) {
+      if (url.includes("/api/v1/comparisons")) {
         return {
           ok: true,
           json: async () => ({

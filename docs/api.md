@@ -50,6 +50,7 @@ Request body:
 ```json
 {
   "arch": "amd64",
+  "platform": "linux/amd64",
   "image_name": "alpine:latest",
   "registry": "index.docker.io",
   "org_id": "default_org",
@@ -63,7 +64,9 @@ Behavior:
 - Generates a CycloneDX SBOM and SPDX SBOM.
 - Runs configured vulnerability scanners.
 - Performs a registry preflight check with configured auth before Syft pulls the image.
+- Honors `platform` during multi-arch image resolution. `arch` remains supported as a legacy alias and normalizes to `linux/<arch>`.
 - Applies per-registry pull throttling before registry API access.
+- Evaluates the resulting image data against `OTTER_POLICY_BUNDLE` when policy mode is enabled.
 - Stores:
   - `sbom.json` as the legacy CycloneDX alias
   - `sbom-cyclonedx.json`
@@ -78,6 +81,11 @@ Async mode:
 - returns `202 Accepted` with a job record and `status_url`
 - the worker queue is also used by the built-in catalog scheduler
 
+Policy gating:
+
+- `OTTER_POLICY_MODE=report` adds a `policy` block to scan and image-detail APIs without changing success status
+- `OTTER_POLICY_MODE=enforce` returns `409 Conflict` for synchronous `POST /api/v1/scans` when the policy gate fails, while still persisting the scan artifacts and indexes
+
 ## Get async scan job status
 
 `GET /api/v1/scan-jobs/:id`
@@ -85,9 +93,11 @@ Async mode:
 Returns the current job state for an async scan request, including:
 
 - pending, running, succeeded, or failed status
-- original scan request payload
+- attempt count, max attempts, last error, and the next retry timestamp when a retry is scheduled
+- original scan request payload with the normalized `platform` when provided
 - completion timestamps
-- vulnerability summary and scanner list when the job succeeds
+- vulnerability summary, scanner list, resolved platform, and policy gate summary when the job succeeds
+- queue counters for pending, running, succeeded, failed, current queue depth, and active targets
 
 ## List scan artifacts
 
@@ -122,16 +132,36 @@ Behavior:
 - compares packages as added, removed, and changed components
 - compares vulnerabilities as new, fixed, and unchanged findings
 - derives layer changes from stored CycloneDX SBOM metadata (`syft:location:*:layerID`)
-- stores the comparison report as `otterxf/comparisons/<comparison-id>/comparison.json`
+- does not write storage; it returns a read-only diff preview
 
 Response includes:
 
 - deterministic `comparison_id`
 - summary message in the form `Image B has X fewer vulns and Y fewer packages`
 - package, vulnerability, layer, and SBOM diffs
-- stored comparison artifact metadata
 
 If the same image reference exists in multiple orgs, Otter returns `409 Conflict` until `org1` or `org2` is provided.
+
+## Persist a comparison report
+
+`POST /api/v1/comparisons`
+
+Request body:
+
+```json
+{
+  "image1": "alpine:3.19",
+  "image2": "alpine:3.20",
+  "org1": "demo-org",
+  "org2": "demo-org"
+}
+```
+
+Behavior:
+
+- builds the same comparison payload as `GET /api/v1/compare`
+- stores the report as `otterxf/comparisons/<comparison-id>/comparison.json`
+- returns the persisted artifact metadata for later retrieval/export
 
 ## Get a stored comparison
 
@@ -177,9 +207,24 @@ These pages are intended for basic no-JavaScript viewing when the React bundle i
 Response includes:
 
 - parsed image metadata for the directory/detail UI
+- stored platform metadata for the selected image and related tags
 - package and vulnerability summary cards
 - available scan artifacts for download
 - related tags already stored for the same repository within the org
+- additive `policy` gate results for the current image
+
+## Get image tags
+
+`GET /api/v1/images/:id/tags?org_id=default_org&page=1&page_size=25&query=3.19`
+
+Response includes:
+
+- the current tag plus other stored tags for the same repository within the org
+- best-effort remote registry tags for the same repository
+- pagination metadata: `count`, `total`, `page`, `page_size`, and `has_more`
+- per-tag scan metadata so clients can distinguish stored scans from remote-only tags
+- `remote_cached` and `remote_cache_expires_at` for cache visibility
+- `remote_tag_error` when remote tag discovery fails but stored tags are still returned
 
 ## List image tags
 
@@ -227,6 +272,14 @@ Formats:
 
 Otter returns an attachment download with a deterministic filename based on `org_id`, `image_id`, and the selected format.
 
+All image exports also set:
+
+- `X-Otter-Policy-Mode`
+- `X-Otter-Policy-Status`
+- `X-Otter-Policy-Allowed`
+
+The JSON vulnerability export embeds the same `policy` block in the document, CSV appends `policy_mode`, `policy_status`, and `policy_allowed` columns, and SARIF includes the gate result under `runs[].properties.policy`.
+
 ## Get image SBOM
 
 `GET /api/v1/images/:id/sbom?org_id=default_org&format=cyclonedx|spdx`
@@ -238,8 +291,19 @@ Response includes:
 - license summary
 - dependency roots
 - dependency tree
+- additive `policy` gate results for the current image
 
 If `format` is omitted, Otter returns the CycloneDX document.
+
+## Repair missing image indexes
+
+`POST /api/v1/images/:id/indexes/repair?org_id=default_org`
+
+Behavior:
+
+- rebuilds the SBOM and vulnerability indexes from already-stored scan artifacts
+- leaves existing index rows untouched when they are already present
+- returns `404` if Otter cannot find any stored artifacts to rebuild from
 
 ## Import image SBOM
 
@@ -269,12 +333,18 @@ Response includes:
 - summary counts by severity, scanner, and status
 - fix recommendations grouped by package
 - trend snapshots across scans
+- additive `policy` gate results for the unfiltered image record
 
 If filters are applied, Otter also includes `summary_all` for the unfiltered record.
 
 ## Get image attestations
 
 `GET /api/v1/images/:id/attestations?org_id=default_org`
+
+Response includes:
+
+- discovered signatures and attestations plus verification status
+- additive `policy` gate results, including signature and provenance requirements when configured
 
 Behavior:
 

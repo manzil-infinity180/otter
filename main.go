@@ -16,8 +16,11 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/otterXf/otter/pkg/api"
+	"github.com/otterXf/otter/pkg/audit"
+	"github.com/otterXf/otter/pkg/auth"
 	otteraws "github.com/otterXf/otter/pkg/aws"
 	"github.com/otterXf/otter/pkg/catalogscan"
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/registry"
 	"github.com/otterXf/otter/pkg/routes"
 	"github.com/otterXf/otter/pkg/sbomindex"
@@ -63,12 +66,34 @@ func main() {
 	if err != nil {
 		log.Fatalf("build registry manager: %v", err)
 	}
+	policyEngine, err := buildPolicyEngine()
+	if err != nil {
+		log.Fatalf("build policy engine: %v", err)
+	}
+	auditRecorder, err := buildAuditRecorder()
+	if err != nil {
+		log.Fatalf("build audit recorder: %v", err)
+	}
+	defer func() {
+		if err := auditRecorder.Close(); err != nil {
+			log.Printf("close audit recorder: %v", err)
+		}
+	}()
 	catalogScanConfig := catalogscan.ConfigFromEnv()
 	scanHandler := api.NewScanHandlerWithRegistry(store, sbomRepository, vulnerabilityRepository, analyzer, registryManager)
-	jobQueue := catalogscan.NewQueue(scanHandler, catalogScanConfig, log.Default())
+	scanHandler.SetAuditRecorder(auditRecorder)
+	scanHandler.SetPolicyEngine(policyEngine)
+	jobQueue, err := catalogscan.NewQueue(scanHandler, catalogScanConfig, log.Default())
+	if err != nil {
+		log.Fatalf("build catalog scan queue: %v", err)
+	}
 	jobQueue.Start(ctx)
 	catalogscan.NewScheduler(jobQueue, catalogScanConfig, log.Default()).Start(ctx)
 	scanHandler.SetJobQueue(jobQueue)
+	authenticator, err := buildAuthenticator()
+	if err != nil {
+		log.Fatalf("build authenticator: %v", err)
+	}
 	handlers := &routes.Handlers{ScanHandler: scanHandler}
 
 	router := gin.New()
@@ -84,7 +109,7 @@ func main() {
 		})
 	})
 
-	routes.SetupRoutes(router, handlers)
+	routes.SetupRoutes(router, handlers, authenticator)
 
 	server := &http.Server{
 		Addr:              ":7789",
@@ -191,4 +216,21 @@ func buildRegistryManager() (registry.Service, error) {
 		return nil, err
 	}
 	return registry.NewManager(repo, registryCfg), nil
+}
+
+func buildAuthenticator() (*auth.Authenticator, error) {
+	cfg, err := auth.ConfigFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return auth.NewAuthenticator(cfg)
+}
+
+func buildPolicyEngine() (*policy.Engine, error) {
+	return policy.NewEngine(policy.ConfigFromEnv())
+}
+
+func buildAuditRecorder() (audit.Recorder, error) {
+	cfg := storage.ConfigFromEnv()
+	return audit.NewRecorder(audit.ConfigFromEnv(cfg.LocalDataDir))
 }

@@ -47,6 +47,9 @@ func TestDefaultRequestsGenerateStableCatalogTargets(t *testing.T) {
 		if request.Source != SourceCatalog || request.Trigger != TriggerScheduler {
 			t.Fatalf("request = %#v", request)
 		}
+		if request.Actor != "catalog-scheduler" || request.ActorType != "system" {
+			t.Fatalf("request actor = %#v", request)
+		}
 	}
 }
 

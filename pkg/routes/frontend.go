@@ -7,11 +7,14 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/otterXf/otter/pkg/auth"
 )
 
-func setupFrontendRoutes(router *gin.Engine, handlers *Handlers) {
-	router.GET("/browse", handlers.ScanHandler.BrowseCatalog)
-	router.GET("/browse/images/:org_id/:id", handlers.ScanHandler.BrowseImage)
+func setupFrontendRoutes(router *gin.Engine, handlers *Handlers, authenticator *auth.Authenticator) {
+	browse := router.Group("/")
+	browse.Use(authenticator.RequireAuthentication())
+	browse.GET("/browse", handlers.ScanHandler.BrowseCatalog)
+	browse.GET("/browse/images/:org_id/:id", handlers.ScanHandler.BrowseImage)
 
 	distDir := filepath.Join("frontend", "dist")
 	indexPath := filepath.Join(distDir, "index.html")

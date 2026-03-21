@@ -22,6 +22,7 @@ export interface CatalogItem {
   image_id: string;
   image_name: string;
   registry: string;
+  platform?: string;
   repository: string;
   repository_path: string;
   tag?: string;
@@ -93,6 +94,7 @@ export interface TagItem {
   org_id: string;
   image_id: string;
   image_name: string;
+  platform?: string;
   tag?: string;
   digest?: string;
   package_count: number;

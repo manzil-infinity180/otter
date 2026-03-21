@@ -12,6 +12,7 @@ package routes
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/otterXf/otter/pkg/api"
+	"github.com/otterXf/otter/pkg/auth"
 )
 
 // Handlers holds all handler dependencies
@@ -22,8 +23,13 @@ type Handlers struct {
 	// OrgHandler  *api.OrgHandler
 }
 
-func SetupRoutes(router *gin.Engine, handlers *Handlers) {
-	setupScanRoutes(router, handlers)
-	setupAWSRoutes(router, handlers)
-	setupFrontendRoutes(router, handlers)
+func SetupRoutes(router *gin.Engine, handlers *Handlers, authenticator *auth.Authenticator) {
+	if authenticator == nil {
+		authenticator = auth.NewDisabledAuthenticator()
+	}
+
+	router.Use(authenticator.Middleware())
+	setupScanRoutes(router, handlers, authenticator)
+	setupAWSRoutes(router, handlers, authenticator)
+	setupFrontendRoutes(router, handlers, authenticator)
 }

@@ -9,11 +9,15 @@ import (
 )
 
 type Config struct {
-	DataDir             string
-	DefaultDockerConfig string
-	HealthcheckTimeout  time.Duration
-	MinPullInterval     time.Duration
-	EnableTagListing    bool
+	DataDir                 string
+	DefaultDockerConfig     string
+	HealthcheckTimeout      time.Duration
+	MinPullInterval         time.Duration
+	RemoteTagCacheTTL       time.Duration
+	AllowedRegistries       []string
+	DeniedRegistries        []string
+	AllowPrivateNetworks    bool
+	AllowInsecureRegistries bool
 }
 
 func ConfigFromEnv(dataDir string) Config {
@@ -40,11 +44,58 @@ func ConfigFromEnv(dataDir string) Config {
 		}
 	}
 
-	return Config{
-		DataDir:             filepath.Join(dataDir, "_registry"),
-		DefaultDockerConfig: defaultDockerConfig,
-		HealthcheckTimeout:  healthTimeout,
-		MinPullInterval:     minPullInterval,
-		EnableTagListing:    true,
+	remoteTagCacheTTL := 5 * time.Minute
+	if raw := strings.TrimSpace(os.Getenv("OTTER_REGISTRY_TAG_CACHE_TTL")); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed >= 0 {
+			remoteTagCacheTTL = parsed
+		}
 	}
+
+	allowPrivateNetworks := false
+	if raw := strings.TrimSpace(os.Getenv("OTTER_REGISTRY_ALLOW_PRIVATE_NETWORKS")); raw != "" {
+		if parsed, err := strconv.ParseBool(raw); err == nil {
+			allowPrivateNetworks = parsed
+		}
+	}
+
+	allowInsecureRegistries := false
+	if raw := strings.TrimSpace(os.Getenv("OTTER_REGISTRY_ALLOW_INSECURE")); raw != "" {
+		if parsed, err := strconv.ParseBool(raw); err == nil {
+			allowInsecureRegistries = parsed
+		}
+	}
+
+	return Config{
+		DataDir:                 filepath.Join(dataDir, "_registry"),
+		DefaultDockerConfig:     defaultDockerConfig,
+		HealthcheckTimeout:      healthTimeout,
+		MinPullInterval:         minPullInterval,
+		RemoteTagCacheTTL:       remoteTagCacheTTL,
+		AllowedRegistries:       parseRegistryPolicyList(os.Getenv("OTTER_REGISTRY_ALLOWLIST")),
+		DeniedRegistries:        parseRegistryPolicyList(os.Getenv("OTTER_REGISTRY_DENYLIST")),
+		AllowPrivateNetworks:    allowPrivateNetworks,
+		AllowInsecureRegistries: allowInsecureRegistries,
+	}
+}
+
+func parseRegistryPolicyList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n'
+	})
+	items := make([]string, 0, len(fields))
+	for _, field := range fields {
+		value := strings.ToLower(strings.TrimSpace(field))
+		if value == "" {
+			continue
+		}
+		items = append(items, value)
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return items
 }

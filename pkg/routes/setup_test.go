@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/otterXf/otter/pkg/api"
+	"github.com/otterXf/otter/pkg/auth"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
@@ -21,7 +22,7 @@ func TestSetupRoutesRegistersExpectedPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	SetupRoutes(router, testHandlers(t))
+	SetupRoutes(router, testHandlers(t), auth.NewDisabledAuthenticator())
 
 	paths := make([]string, 0, len(router.Routes()))
 	for _, route := range router.Routes() {
@@ -30,8 +31,10 @@ func TestSetupRoutesRegistersExpectedPaths(t *testing.T) {
 
 	for _, want := range []string{
 		"POST /api/v1/scans",
+		"POST /api/v1/comparisons",
 		"GET /api/v1/catalog",
 		"GET /api/v1/images/:id/overview",
+		"POST /api/v1/images/:id/indexes/repair",
 		"GET /api/v1/compare",
 		"GET /api/v1/aws/scans/:org_id/:image_id",
 		"GET /browse",
@@ -50,7 +53,7 @@ func TestSetupFrontendRoutesFallbackRedirectsWithoutDist(t *testing.T) {
 	defer restore()
 
 	router := gin.New()
-	setupFrontendRoutes(router, testHandlers(t))
+	setupFrontendRoutes(router, testHandlers(t), auth.NewDisabledAuthenticator())
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	resp := httptest.NewRecorder()
@@ -92,7 +95,7 @@ func TestSetupFrontendRoutesServeSPAAndNoRoute(t *testing.T) {
 	}
 
 	router := gin.New()
-	setupFrontendRoutes(router, testHandlers(t))
+	setupFrontendRoutes(router, testHandlers(t), auth.NewDisabledAuthenticator())
 
 	for _, path := range []string{"/", "/images/demo-org/demo-image"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
