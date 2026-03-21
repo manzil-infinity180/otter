@@ -63,10 +63,19 @@ type ImageAccess struct {
 	RegistryOptions *stereoscopeimage.RegistryOptions
 }
 
+type RepositoryTagsResult struct {
+	Repository     string    `json:"repository"`
+	Tags           []string  `json:"tags"`
+	Cached         bool      `json:"cached"`
+	FetchedAt      time.Time `json:"fetched_at,omitempty"`
+	CacheExpiresAt time.Time `json:"cache_expires_at,omitempty"`
+}
+
 type Service interface {
 	Configure(context.Context, ConfigureRequest) (ConfigureResult, error)
 	List(context.Context) ([]Summary, error)
 	PrepareImage(context.Context, string) (ImageAccess, error)
+	ListRepositoryTags(context.Context, string) (RepositoryTagsResult, error)
 }
 
 type Repository interface {

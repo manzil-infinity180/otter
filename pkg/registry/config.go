@@ -13,6 +13,7 @@ type Config struct {
 	DefaultDockerConfig     string
 	HealthcheckTimeout      time.Duration
 	MinPullInterval         time.Duration
+	RemoteTagCacheTTL       time.Duration
 	AllowedRegistries       []string
 	DeniedRegistries        []string
 	AllowPrivateNetworks    bool
@@ -43,6 +44,13 @@ func ConfigFromEnv(dataDir string) Config {
 		}
 	}
 
+	remoteTagCacheTTL := 5 * time.Minute
+	if raw := strings.TrimSpace(os.Getenv("OTTER_REGISTRY_TAG_CACHE_TTL")); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed >= 0 {
+			remoteTagCacheTTL = parsed
+		}
+	}
+
 	allowPrivateNetworks := false
 	if raw := strings.TrimSpace(os.Getenv("OTTER_REGISTRY_ALLOW_PRIVATE_NETWORKS")); raw != "" {
 		if parsed, err := strconv.ParseBool(raw); err == nil {
@@ -62,6 +70,7 @@ func ConfigFromEnv(dataDir string) Config {
 		DefaultDockerConfig:     defaultDockerConfig,
 		HealthcheckTimeout:      healthTimeout,
 		MinPullInterval:         minPullInterval,
+		RemoteTagCacheTTL:       remoteTagCacheTTL,
 		AllowedRegistries:       parseRegistryPolicyList(os.Getenv("OTTER_REGISTRY_ALLOWLIST")),
 		DeniedRegistries:        parseRegistryPolicyList(os.Getenv("OTTER_REGISTRY_DENYLIST")),
 		AllowPrivateNetworks:    allowPrivateNetworks,

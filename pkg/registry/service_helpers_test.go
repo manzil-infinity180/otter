@@ -3,11 +3,13 @@ package registry
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	stereoscopeimage "github.com/anchore/stereoscope/pkg/image"
 	"github.com/google/go-containerregistry/pkg/name"
+	v1remote "github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
 type stubRegistryRepo struct {
@@ -205,5 +207,63 @@ func TestSummarizeRecord(t *testing.T) {
 	})
 	if !summary.HasCredentials || !summary.HasDockerConfigPath || summary.Registry != "ghcr.io" {
 		t.Fatalf("summarize() = %#v", summary)
+	}
+}
+
+func TestManagerListRepositoryTagsUsesTTLCache(t *testing.T) {
+	t.Parallel()
+
+	manager := NewManager(stubRegistryRepo{getErr: ErrNotFound}, Config{
+		RemoteTagCacheTTL: 2 * time.Minute,
+	})
+
+	now := time.Date(2026, 3, 21, 10, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+
+	calls := 0
+	manager.listRemoteTags = func(_ context.Context, repo name.Repository, _ []v1remote.Option) ([]string, error) {
+		calls++
+		if got, want := repo.Name(), "ghcr.io/demo/app"; got != want {
+			t.Fatalf("repository = %q, want %q", got, want)
+		}
+		return []string{"3.20", "latest", "3.19"}, nil
+	}
+
+	first, err := manager.ListRepositoryTags(context.Background(), "ghcr.io/demo/app:latest")
+	if err != nil {
+		t.Fatalf("ListRepositoryTags(first) error = %v", err)
+	}
+	if first.Cached {
+		t.Fatal("expected first tag listing to bypass cache")
+	}
+	if got, want := strings.Join(first.Tags, ","), "3.19,3.20,latest"; got != want {
+		t.Fatalf("first.Tags = %q, want %q", got, want)
+	}
+	if first.CacheExpiresAt.IsZero() {
+		t.Fatal("expected cache expiration timestamp on first fetch")
+	}
+
+	now = now.Add(time.Minute)
+	second, err := manager.ListRepositoryTags(context.Background(), "ghcr.io/demo/app:latest")
+	if err != nil {
+		t.Fatalf("ListRepositoryTags(second) error = %v", err)
+	}
+	if !second.Cached {
+		t.Fatal("expected second tag listing to hit cache")
+	}
+	if got, want := calls, 1; got != want {
+		t.Fatalf("remote list calls = %d, want %d", got, want)
+	}
+
+	now = now.Add(2*time.Minute + time.Second)
+	third, err := manager.ListRepositoryTags(context.Background(), "ghcr.io/demo/app:latest")
+	if err != nil {
+		t.Fatalf("ListRepositoryTags(third) error = %v", err)
+	}
+	if third.Cached {
+		t.Fatal("expected expired cache entry to trigger a refetch")
+	}
+	if got, want := calls, 2; got != want {
+		t.Fatalf("remote list calls after expiry = %d, want %d", got, want)
 	}
 }

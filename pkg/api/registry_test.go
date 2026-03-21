@@ -20,12 +20,15 @@ import (
 )
 
 type stubRegistryService struct {
-	configureResult registry.ConfigureResult
-	configureErr    error
-	listResult      []registry.Summary
-	listErr         error
-	access          registry.ImageAccess
-	accessErr       error
+	configureResult      registry.ConfigureResult
+	configureErr         error
+	listResult           []registry.Summary
+	listErr              error
+	access               registry.ImageAccess
+	accessErr            error
+	repositoryTagsResult registry.RepositoryTagsResult
+	repositoryTagsErr    error
+	repositoryTagsFunc   func(context.Context, string) (registry.RepositoryTagsResult, error)
 }
 
 func (s stubRegistryService) Configure(context.Context, registry.ConfigureRequest) (registry.ConfigureResult, error) {
@@ -38,6 +41,13 @@ func (s stubRegistryService) List(context.Context) ([]registry.Summary, error) {
 
 func (s stubRegistryService) PrepareImage(context.Context, string) (registry.ImageAccess, error) {
 	return s.access, s.accessErr
+}
+
+func (s stubRegistryService) ListRepositoryTags(ctx context.Context, imageRef string) (registry.RepositoryTagsResult, error) {
+	if s.repositoryTagsFunc != nil {
+		return s.repositoryTagsFunc(ctx, imageRef)
+	}
+	return s.repositoryTagsResult, s.repositoryTagsErr
 }
 
 type contextCheckingAnalyzer struct {

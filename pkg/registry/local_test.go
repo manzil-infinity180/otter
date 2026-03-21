@@ -224,6 +224,7 @@ func TestConfigFromEnv(t *testing.T) {
 	t.Setenv("OTTER_DOCKER_CONFIG_PATH", "/tmp/config.json")
 	t.Setenv("OTTER_REGISTRY_HEALTHCHECK_TIMEOUT", "5s")
 	t.Setenv("OTTER_REGISTRY_PULLS_PER_SECOND", "4")
+	t.Setenv("OTTER_REGISTRY_TAG_CACHE_TTL", "10m")
 	t.Setenv("OTTER_REGISTRY_ALLOWLIST", "ghcr.io,*.docker.io")
 	t.Setenv("OTTER_REGISTRY_DENYLIST", "registry.internal")
 	t.Setenv("OTTER_REGISTRY_ALLOW_PRIVATE_NETWORKS", "true")
@@ -242,6 +243,9 @@ func TestConfigFromEnv(t *testing.T) {
 	}
 	if got, want := cfg.MinPullInterval.String(), "250ms"; got != want {
 		t.Fatalf("MinPullInterval = %q, want %q", got, want)
+	}
+	if got, want := cfg.RemoteTagCacheTTL.String(), "10m0s"; got != want {
+		t.Fatalf("RemoteTagCacheTTL = %q, want %q", got, want)
 	}
 	if got, want := strings.Join(cfg.AllowedRegistries, ","), "ghcr.io,*.docker.io"; got != want {
 		t.Fatalf("AllowedRegistries = %q, want %q", got, want)

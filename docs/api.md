@@ -206,6 +206,19 @@ Response includes:
 - available scan artifacts for download
 - related tags already stored for the same repository within the org
 
+## Get image tags
+
+`GET /api/v1/images/:id/tags?org_id=default_org&page=1&page_size=25&query=3.19`
+
+Response includes:
+
+- the current tag plus other stored tags for the same repository within the org
+- best-effort remote registry tags for the same repository
+- pagination metadata: `count`, `total`, `page`, `page_size`, and `has_more`
+- per-tag scan metadata so clients can distinguish stored scans from remote-only tags
+- `remote_cached` and `remote_cache_expires_at` for cache visibility
+- `remote_tag_error` when remote tag discovery fails but stored tags are still returned
+
 ## Get image compliance
 
 `GET /api/v1/images/:id/compliance?org_id=default_org`

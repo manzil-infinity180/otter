@@ -24,10 +24,33 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-09` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-10` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-10: cache and paginate remote repository tag discovery
+
+What changed:
+
+- added TTL-based remote tag caching to `pkg/registry.Manager`, configurable with `OTTER_REGISTRY_TAG_CACHE_TTL`, so repeated repository tag reads reuse the cached tag set instead of re-fetching the full registry listing on every request
+- extended the registry service contract with `ListRepositoryTags`, keeping registry auth, policy enforcement, and rate limiting on the same path used for scan preflight before any remote tag discovery
+- implemented `GET /api/v1/images/:id/tags` to merge the current image tag plus other stored same-repository scans with best-effort remote tag discovery, then paginate and filter the combined result set
+- exposed additive response metadata for tag paging and cache visibility: `count`, `total`, `page`, `page_size`, `has_more`, `remote_cached`, `remote_cache_expires_at`, and `remote_tag_error`
+- documented the new image-tag API and the remote tag cache TTL setting in `docs/api.md` and `Readme.md`
+
+What was verified:
+
+- `go test ./pkg/registry ./pkg/api ./pkg/routes`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- remote tag pagination is API-side over a cached full repository tag snapshot because the upstream registry client still exposes whole-list tag discovery; this remediation removes repeated full fetches on page loads without changing the existing registry dependency shape
+- the tag listing route is additive and does not replace the existing overview payload, so current clients stay compatible while newer clients can move tag-heavy views to `GET /api/v1/images/:id/tags`
+- operators with very large registries can tune `OTTER_REGISTRY_TAG_CACHE_TTL` upward to reduce registry traffic further, or set it to `0` to disable the cache if they prefer fresh tag reads every request
 
 ### OTTER-AUDIT-09: indexed catalog queries and pagination
 

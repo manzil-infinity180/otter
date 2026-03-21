@@ -49,6 +49,38 @@ type ImageTagSummary struct {
 	UpdatedAt            time.Time         `json:"updated_at"`
 }
 
+type ImageTagListItem struct {
+	OrgID                string            `json:"org_id,omitempty"`
+	ImageID              string            `json:"image_id,omitempty"`
+	ImageName            string            `json:"image_name"`
+	Platform             string            `json:"platform,omitempty"`
+	Tag                  string            `json:"tag,omitempty"`
+	Digest               string            `json:"digest,omitempty"`
+	PackageCount         int               `json:"package_count"`
+	VulnerabilitySummary vulnindex.Summary `json:"vulnerability_summary"`
+	UpdatedAt            time.Time         `json:"updated_at,omitempty"`
+	Current              bool              `json:"current"`
+	Scanned              bool              `json:"scanned"`
+	Source               string            `json:"source"`
+}
+
+type ImageTagsResponse struct {
+	OrgID                string             `json:"org_id"`
+	ImageID              string             `json:"image_id"`
+	ImageName            string             `json:"image_name"`
+	Repository           string             `json:"repository"`
+	StorageBackend       string             `json:"storage_backend"`
+	Page                 int                `json:"page"`
+	PageSize             int                `json:"page_size"`
+	Count                int                `json:"count"`
+	Total                int                `json:"total"`
+	HasMore              bool               `json:"has_more"`
+	Items                []ImageTagListItem `json:"items"`
+	RemoteCached         bool               `json:"remote_cached"`
+	RemoteCacheExpiresAt time.Time          `json:"remote_cache_expires_at,omitempty"`
+	RemoteTagError       string             `json:"remote_tag_error,omitempty"`
+}
+
 type ImageOverview struct {
 	ImageCatalogEntry
 	StorageBackend  string            `json:"storage_backend"`
@@ -65,6 +97,12 @@ type catalogFilters struct {
 	Page        int
 	PageSize    int
 	AllowedOrgs map[string]struct{}
+}
+
+type imageTagFilters struct {
+	Query    string
+	Page     int
+	PageSize int
 }
 
 type imageReferenceParts struct {
@@ -132,6 +170,36 @@ func (h *ScanHandler) GetImageOverview(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, overview)
+}
+
+func (h *ScanHandler) GetImageTags(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
+
+	filters, err := parseImageTagFilters(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	response, err := h.buildImageTags(c.Request.Context(), orgID, imageID, filters)
+	if err != nil {
+		switch {
+		case errors.Is(err, sbomindex.ErrNotFound), errors.Is(err, vulnindex.ErrNotFound), errors.Is(err, storage.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "stored image reference not found"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load image tags: %v", err)})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *ScanHandler) BrowseCatalog(c *gin.Context) {
@@ -274,6 +342,35 @@ func parseCatalogFilters(c *gin.Context) (catalogFilters, error) {
 	return filters, nil
 }
 
+func parseImageTagFilters(c *gin.Context) (imageTagFilters, error) {
+	filters := imageTagFilters{
+		Query:    strings.TrimSpace(c.Query("query")),
+		Page:     1,
+		PageSize: 25,
+	}
+	if filters.Query == "" {
+		filters.Query = strings.TrimSpace(c.Query("q"))
+	}
+	if c.Query("page") != "" {
+		value, err := strconv.Atoi(strings.TrimSpace(c.Query("page")))
+		if err != nil || value <= 0 {
+			return imageTagFilters{}, fmt.Errorf("page must be a positive integer")
+		}
+		filters.Page = value
+	}
+	if c.Query("page_size") != "" {
+		value, err := strconv.Atoi(strings.TrimSpace(c.Query("page_size")))
+		if err != nil || value <= 0 {
+			return imageTagFilters{}, fmt.Errorf("page_size must be a positive integer")
+		}
+		if value > 100 {
+			value = 100
+		}
+		filters.PageSize = value
+	}
+	return filters, nil
+}
+
 func (h *ScanHandler) buildCatalog(ctx context.Context, filters catalogFilters) ([]ImageCatalogEntry, int, error) {
 	query := sbomindex.CatalogQuery{
 		OrgID:    filters.OrgID,
@@ -301,6 +398,119 @@ func (h *ScanHandler) buildCatalog(ctx context.Context, filters catalogFilters) 
 	}
 
 	return entries, page.Total, nil
+}
+
+func (h *ScanHandler) buildImageTags(ctx context.Context, orgID, imageID string, filters imageTagFilters) (ImageTagsResponse, error) {
+	imageRef, err := h.resolveStoredImageReference(ctx, orgID, imageID)
+	if err != nil {
+		return ImageTagsResponse{}, err
+	}
+
+	refParts := parseImageReference(imageRef)
+	repositoryKey := refParts.Repository
+	if repositoryKey == "" {
+		repositoryKey = strings.TrimSpace(refParts.RepositoryPath)
+	}
+
+	storedRecords, err := h.sbomIndex.ListRepositoryTags(ctx, sbomindex.RepositoryTagQuery{
+		OrgID:          orgID,
+		RepositoryKey:  repositoryKey,
+		ExcludeImageID: imageID,
+	})
+	if err != nil {
+		return ImageTagsResponse{}, fmt.Errorf("list stored repository tags: %w", err)
+	}
+
+	itemsByKey := make(map[string]ImageTagListItem)
+	if currentItem, ok, err := h.buildCurrentImageTagItem(ctx, orgID, imageID, imageRef); err != nil {
+		return ImageTagsResponse{}, err
+	} else if ok {
+		itemsByKey[tagListItemKey(currentItem)] = currentItem
+	}
+	for _, record := range storedRecords {
+		item := buildStoredTagListItem(record)
+		if item.Tag == "" && item.Digest == "" {
+			continue
+		}
+		key := tagListItemKey(item)
+		if existing, ok := itemsByKey[key]; ok {
+			item = mergeImageTagItems(existing, item)
+		}
+		itemsByKey[key] = item
+	}
+
+	response := ImageTagsResponse{
+		OrgID:          orgID,
+		ImageID:        imageID,
+		ImageName:      imageRef,
+		Repository:     repositoryKey,
+		StorageBackend: h.store.Backend(),
+		Page:           filters.Page,
+		PageSize:       filters.PageSize,
+	}
+	if response.Repository == "" {
+		response.Repository = refParts.Repository
+	}
+
+	remoteTags, remoteErr := h.registry.ListRepositoryTags(ctx, imageRef)
+	if remoteErr != nil {
+		response.RemoteTagError = remoteErr.Error()
+	} else {
+		response.RemoteCached = remoteTags.Cached
+		response.RemoteCacheExpiresAt = remoteTags.CacheExpiresAt
+		for _, tag := range remoteTags.Tags {
+			item := ImageTagListItem{
+				ImageName:            remoteTags.Repository + ":" + tag,
+				Tag:                  tag,
+				Current:              tag == refParts.Tag,
+				Scanned:              false,
+				Source:               "remote",
+				VulnerabilitySummary: vulnindex.Summary{},
+			}
+			key := tagListItemKey(item)
+			if existing, ok := itemsByKey[key]; ok {
+				existing.Source = mergeTagSources(existing.Source, "remote")
+				itemsByKey[key] = existing
+				continue
+			}
+			itemsByKey[key] = item
+		}
+	}
+
+	items := make([]ImageTagListItem, 0, len(itemsByKey))
+	for _, item := range itemsByKey {
+		if matchesImageTagQuery(item, filters.Query) {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Current != items[j].Current {
+			return items[i].Current
+		}
+		if items[i].Scanned != items[j].Scanned {
+			return items[i].Scanned
+		}
+		if !items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].UpdatedAt.After(items[j].UpdatedAt)
+		}
+		if items[i].Tag != items[j].Tag {
+			return items[i].Tag < items[j].Tag
+		}
+		return items[i].ImageName < items[j].ImageName
+	})
+
+	response.Total = len(items)
+	start := (filters.Page - 1) * filters.PageSize
+	if start < len(items) {
+		end := start + filters.PageSize
+		if end > len(items) {
+			end = len(items)
+		}
+		response.Items = items[start:end]
+	}
+	response.Count = len(response.Items)
+	response.HasMore = filters.Page*filters.PageSize < response.Total
+	return response, nil
 }
 
 func buildImageCatalogEntry(record sbomindex.CatalogRecord) ImageCatalogEntry {
@@ -407,6 +617,60 @@ func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID str
 	}, nil
 }
 
+func (h *ScanHandler) buildCurrentImageTagItem(ctx context.Context, orgID, imageID, imageRef string) (ImageTagListItem, bool, error) {
+	parts := parseImageReference(imageRef)
+	if parts.Tag == "" && parts.Digest == "" {
+		return ImageTagListItem{}, false, nil
+	}
+
+	item := ImageTagListItem{
+		OrgID:                orgID,
+		ImageID:              imageID,
+		ImageName:            imageRef,
+		Platform:             "",
+		Tag:                  parts.Tag,
+		Digest:               parts.Digest,
+		Current:              true,
+		Scanned:              true,
+		Source:               "stored",
+		VulnerabilitySummary: vulnindex.Summary{},
+	}
+
+	if record, err := h.sbomIndex.Get(ctx, orgID, imageID); err == nil {
+		item.Platform = record.Platform
+		item.PackageCount = record.PackageCount
+		item.UpdatedAt = latestTimestamp(item.UpdatedAt, record.UpdatedAt)
+	} else if !errors.Is(err, sbomindex.ErrNotFound) {
+		return ImageTagListItem{}, false, fmt.Errorf("load current tag sbom summary: %w", err)
+	}
+
+	if vulnerabilityRecord, err := h.getExistingVulnerabilityRecord(ctx, orgID, imageID); err != nil {
+		return ImageTagListItem{}, false, fmt.Errorf("load current tag vulnerability summary: %w", err)
+	} else if vulnerabilityRecord != nil {
+		item.VulnerabilitySummary = vulnerabilityRecord.Summary
+		item.UpdatedAt = latestTimestamp(item.UpdatedAt, vulnerabilityRecord.UpdatedAt)
+	}
+
+	return item, true, nil
+}
+
+func buildStoredTagListItem(record sbomindex.CatalogRecord) ImageTagListItem {
+	parts := parseImageReference(record.ImageName)
+	return ImageTagListItem{
+		OrgID:                record.OrgID,
+		ImageID:              record.ImageID,
+		ImageName:            record.ImageName,
+		Platform:             record.Platform,
+		Tag:                  parts.Tag,
+		Digest:               parts.Digest,
+		PackageCount:         record.PackageCount,
+		VulnerabilitySummary: record.VulnerabilitySummary,
+		UpdatedAt:            record.UpdatedAt,
+		Scanned:              true,
+		Source:               "stored",
+	}
+}
+
 func matchesCatalogFilters(entry ImageCatalogEntry, filters catalogFilters) bool {
 	if len(filters.AllowedOrgs) > 0 {
 		if _, ok := filters.AllowedOrgs[entry.OrgID]; !ok {
@@ -439,6 +703,93 @@ func matchesCatalogFilters(entry ImageCatalogEntry, filters catalogFilters) bool
 	}
 
 	return false
+}
+
+func matchesImageTagQuery(item ImageTagListItem, query string) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return true
+	}
+
+	for _, field := range []string{item.Tag, item.Digest, item.ImageName} {
+		if strings.Contains(strings.ToLower(field), query) {
+			return true
+		}
+	}
+	return false
+}
+
+func tagListItemKey(item ImageTagListItem) string {
+	switch {
+	case item.Tag != "":
+		return "tag:" + item.Tag
+	case item.Digest != "":
+		return "digest:" + item.Digest
+	default:
+		return "image:" + item.ImageName
+	}
+}
+
+func mergeTagSources(left, right string) string {
+	switch {
+	case left == "" || left == right:
+		return right
+	case right == "":
+		return left
+	case (left == "stored" && right == "remote") || (left == "remote" && right == "stored"):
+		return "stored+remote"
+	default:
+		if strings.Contains(left, right) {
+			return left
+		}
+		return left + "+" + right
+	}
+}
+
+func mergeImageTagItems(existing, candidate ImageTagListItem) ImageTagListItem {
+	merged := candidate
+	if existing.Current {
+		merged = existing
+	} else if existing.Scanned && (!candidate.Scanned || existing.UpdatedAt.After(candidate.UpdatedAt)) {
+		merged = existing
+	}
+
+	merged.Current = existing.Current || candidate.Current
+	merged.Scanned = existing.Scanned || candidate.Scanned
+	merged.Source = mergeTagSources(existing.Source, candidate.Source)
+
+	if merged.PackageCount == 0 {
+		if existing.PackageCount != 0 {
+			merged.PackageCount = existing.PackageCount
+		} else {
+			merged.PackageCount = candidate.PackageCount
+		}
+	}
+	if merged.Platform == "" {
+		merged.Platform = existing.Platform
+	}
+	if merged.ImageName == "" {
+		merged.ImageName = existing.ImageName
+	}
+	if merged.OrgID == "" {
+		merged.OrgID = existing.OrgID
+	}
+	if merged.ImageID == "" {
+		merged.ImageID = existing.ImageID
+	}
+	if merged.Tag == "" {
+		merged.Tag = existing.Tag
+	}
+	if merged.Digest == "" {
+		merged.Digest = existing.Digest
+	}
+	if merged.UpdatedAt.IsZero() {
+		merged.UpdatedAt = existing.UpdatedAt
+	}
+	if merged.VulnerabilitySummary.Total == 0 && existing.VulnerabilitySummary.Total != 0 {
+		merged.VulnerabilitySummary = existing.VulnerabilitySummary
+	}
+	return merged
 }
 
 func sortCatalogEntries(entries []ImageCatalogEntry, sortBy string) {

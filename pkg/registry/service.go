@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	stereoscopeimage "github.com/anchore/stereoscope/pkg/image"
@@ -19,16 +20,24 @@ import (
 )
 
 type Manager struct {
-	repo    Repository
-	cfg     Config
-	limiter *pullLimiter
+	repo           Repository
+	cfg            Config
+	limiter        *pullLimiter
+	tagCache       *remoteTagCache
+	listRemoteTags func(context.Context, name.Repository, []v1remote.Option) ([]string, error)
+	now            func() time.Time
 }
 
 func NewManager(repo Repository, cfg Config) *Manager {
 	return &Manager{
-		repo:    repo,
-		cfg:     cfg,
-		limiter: newPullLimiter(cfg.MinPullInterval),
+		repo:     repo,
+		cfg:      cfg,
+		limiter:  newPullLimiter(cfg.MinPullInterval),
+		tagCache: newRemoteTagCache(),
+		listRemoteTags: func(ctx context.Context, repo name.Repository, options []v1remote.Option) ([]string, error) {
+			return v1remote.List(repo, options...)
+		},
+		now: time.Now,
 	}
 }
 
@@ -127,6 +136,62 @@ func (m *Manager) PrepareImage(ctx context.Context, imageRef string) (ImageAcces
 		AuthSource:      authSource,
 		RegistryOptions: registryOptions,
 	}, nil
+}
+
+func (m *Manager) ListRepositoryTags(ctx context.Context, imageRef string) (RepositoryTagsResult, error) {
+	ref, err := name.ParseReference(strings.TrimSpace(imageRef))
+	if err != nil {
+		return RepositoryTagsResult{}, fmt.Errorf("parse image reference: %w", err)
+	}
+
+	repository := ref.Context()
+	record, err := m.recordForRegistry(ctx, repository.RegistryStr())
+	if err != nil {
+		return RepositoryTagsResult{}, err
+	}
+	if err := m.enforcePolicy(ctx, "list-repository-tags", record); err != nil {
+		return RepositoryTagsResult{}, err
+	}
+
+	cacheKey := remoteTagCacheKey(repository, record)
+	now := m.currentTime().UTC()
+	if cached, ok := m.tagCache.Get(cacheKey, now); ok {
+		return RepositoryTagsResult{
+			Repository:     repository.Name(),
+			Tags:           cached.Tags,
+			Cached:         true,
+			FetchedAt:      cached.FetchedAt,
+			CacheExpiresAt: cached.ExpiresAt,
+		}, nil
+	}
+
+	registryOptions, _, err := m.registryOptions(record)
+	if err != nil {
+		return RepositoryTagsResult{}, err
+	}
+	if err := m.limiter.Wait(ctx, canonicalRegistry(repository.RegistryStr())); err != nil {
+		return RepositoryTagsResult{}, fmt.Errorf("wait for registry rate limit: %w", err)
+	}
+
+	options, err := remoteOptions(ctx, repository.Tag("latest"), registryOptions)
+	if err != nil {
+		return RepositoryTagsResult{}, err
+	}
+	tags, err := m.listRemoteTags(ctx, repository, options)
+	if err != nil {
+		return RepositoryTagsResult{}, fmt.Errorf("list repository tags for %q: %w", repository.Name(), err)
+	}
+	sort.Strings(tags)
+
+	result := RepositoryTagsResult{
+		Repository: repository.Name(),
+		Tags:       append([]string(nil), tags...),
+		FetchedAt:  now,
+	}
+	if expiresAt, ok := m.tagCache.Set(cacheKey, tags, now, m.cfg.RemoteTagCacheTTL); ok {
+		result.CacheExpiresAt = expiresAt
+	}
+	return result, nil
 }
 
 func (m *Manager) recordForRegistry(ctx context.Context, registryName string) (Record, error) {
@@ -417,6 +482,77 @@ func summarize(record Record) Summary {
 
 func canonicalRegistry(value string) string {
 	return NormalizeRegistry(value)
+}
+
+type remoteTagCache struct {
+	mu      sync.RWMutex
+	entries map[string]remoteTagCacheEntry
+}
+
+type remoteTagCacheEntry struct {
+	Tags      []string
+	FetchedAt time.Time
+	ExpiresAt time.Time
+}
+
+func newRemoteTagCache() *remoteTagCache {
+	return &remoteTagCache{entries: make(map[string]remoteTagCacheEntry)}
+}
+
+func (c *remoteTagCache) Get(key string, now time.Time) (remoteTagCacheEntry, bool) {
+	if c == nil {
+		return remoteTagCacheEntry{}, false
+	}
+
+	c.mu.RLock()
+	entry, ok := c.entries[key]
+	c.mu.RUnlock()
+	if !ok {
+		return remoteTagCacheEntry{}, false
+	}
+	if !entry.ExpiresAt.IsZero() && !entry.ExpiresAt.After(now) {
+		c.mu.Lock()
+		delete(c.entries, key)
+		c.mu.Unlock()
+		return remoteTagCacheEntry{}, false
+	}
+
+	entry.Tags = append([]string(nil), entry.Tags...)
+	return entry, true
+}
+
+func (c *remoteTagCache) Set(key string, tags []string, now time.Time, ttl time.Duration) (time.Time, bool) {
+	if c == nil || ttl <= 0 {
+		return time.Time{}, false
+	}
+
+	entry := remoteTagCacheEntry{
+		Tags:      append([]string(nil), tags...),
+		FetchedAt: now,
+		ExpiresAt: now.Add(ttl),
+	}
+	c.mu.Lock()
+	c.entries[key] = entry
+	c.mu.Unlock()
+	return entry.ExpiresAt, true
+}
+
+func remoteTagCacheKey(repository name.Repository, record Record) string {
+	return strings.Join([]string{
+		repository.Name(),
+		record.AuthMode,
+		record.DockerConfigPath,
+		fmt.Sprintf("%t", record.InsecureUseHTTP),
+		fmt.Sprintf("%t", record.InsecureSkipTLSVerify),
+		record.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}, "|")
+}
+
+func (m *Manager) currentTime() time.Time {
+	if m != nil && m.now != nil {
+		return m.now()
+	}
+	return time.Now()
 }
 
 func NormalizeRegistry(value string) string {
