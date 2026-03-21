@@ -66,6 +66,7 @@ Behavior:
 - Performs a registry preflight check with configured auth before Syft pulls the image.
 - Honors `platform` during multi-arch image resolution. `arch` remains supported as a legacy alias and normalizes to `linux/<arch>`.
 - Applies per-registry pull throttling before registry API access.
+- Evaluates the resulting image data against `OTTER_POLICY_BUNDLE` when policy mode is enabled.
 - Stores:
   - `sbom.json` as the legacy CycloneDX alias
   - `sbom-cyclonedx.json`
@@ -80,6 +81,11 @@ Async mode:
 - returns `202 Accepted` with a job record and `status_url`
 - the worker queue is also used by the built-in catalog scheduler
 
+Policy gating:
+
+- `OTTER_POLICY_MODE=report` adds a `policy` block to scan and image-detail APIs without changing success status
+- `OTTER_POLICY_MODE=enforce` returns `409 Conflict` for synchronous `POST /api/v1/scans` when the policy gate fails, while still persisting the scan artifacts and indexes
+
 ## Get async scan job status
 
 `GET /api/v1/scan-jobs/:id`
@@ -90,7 +96,7 @@ Returns the current job state for an async scan request, including:
 - attempt count, max attempts, last error, and the next retry timestamp when a retry is scheduled
 - original scan request payload with the normalized `platform` when provided
 - completion timestamps
-- vulnerability summary, scanner list, and resolved platform when the job succeeds
+- vulnerability summary, scanner list, resolved platform, and policy gate summary when the job succeeds
 - queue counters for pending, running, succeeded, failed, current queue depth, and active targets
 
 ## List scan artifacts
@@ -205,6 +211,7 @@ Response includes:
 - package and vulnerability summary cards
 - available scan artifacts for download
 - related tags already stored for the same repository within the org
+- additive `policy` gate results for the current image
 
 ## Get image tags
 
@@ -253,6 +260,14 @@ Formats:
 
 Otter returns an attachment download with a deterministic filename based on `org_id`, `image_id`, and the selected format.
 
+All image exports also set:
+
+- `X-Otter-Policy-Mode`
+- `X-Otter-Policy-Status`
+- `X-Otter-Policy-Allowed`
+
+The JSON vulnerability export embeds the same `policy` block in the document, CSV appends `policy_mode`, `policy_status`, and `policy_allowed` columns, and SARIF includes the gate result under `runs[].properties.policy`.
+
 ## Get image SBOM
 
 `GET /api/v1/images/:id/sbom?org_id=default_org&format=cyclonedx|spdx`
@@ -264,6 +279,7 @@ Response includes:
 - license summary
 - dependency roots
 - dependency tree
+- additive `policy` gate results for the current image
 
 If `format` is omitted, Otter returns the CycloneDX document.
 
@@ -305,12 +321,18 @@ Response includes:
 - summary counts by severity, scanner, and status
 - fix recommendations grouped by package
 - trend snapshots across scans
+- additive `policy` gate results for the unfiltered image record
 
 If filters are applied, Otter also includes `summary_all` for the unfiltered record.
 
 ## Get image attestations
 
 `GET /api/v1/images/:id/attestations?org_id=default_org`
+
+Response includes:
+
+- discovered signatures and attestations plus verification status
+- additive `policy` gate results, including signature and provenance requirements when configured
 
 Behavior:
 

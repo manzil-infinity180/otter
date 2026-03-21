@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-containerregistry/pkg/name"
 
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/storage"
 	"github.com/otterXf/otter/pkg/vulnindex"
@@ -87,6 +88,7 @@ type ImageOverview struct {
 	DependencyRoots []string          `json:"dependency_roots,omitempty"`
 	Files           []ObjectResponse  `json:"files"`
 	Tags            []ImageTagSummary `json:"tags"`
+	Policy          policy.Evaluation `json:"policy"`
 }
 
 type catalogFilters struct {
@@ -551,7 +553,8 @@ func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID str
 		LicenseSummary: record.LicenseSummary,
 		UpdatedAt:      record.UpdatedAt,
 	})
-	if vulnerabilityRecord, err := h.getExistingVulnerabilityRecord(ctx, record.OrgID, record.ImageID); err != nil {
+	var vulnerabilityRecord *vulnindex.Record
+	if vulnerabilityRecord, err = h.getExistingVulnerabilityRecord(ctx, record.OrgID, record.ImageID); err != nil {
 		return ImageOverview{}, fmt.Errorf("load vulnerability summary for %s/%s: %w", record.OrgID, record.ImageID, err)
 	} else if vulnerabilityRecord != nil {
 		entry.VulnerabilitySummary = vulnerabilityRecord.Summary
@@ -614,6 +617,7 @@ func (h *ScanHandler) buildImageOverview(ctx context.Context, orgID, imageID str
 		DependencyRoots:   record.DependencyRoots,
 		Files:             files,
 		Tags:              tags,
+		Policy:            h.evaluatePolicy(ctx, orgID, imageID, record.ImageName, vulnerabilityRecord, nil, nil),
 	}, nil
 }
 

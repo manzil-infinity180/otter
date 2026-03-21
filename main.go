@@ -20,6 +20,7 @@ import (
 	"github.com/otterXf/otter/pkg/auth"
 	otteraws "github.com/otterXf/otter/pkg/aws"
 	"github.com/otterXf/otter/pkg/catalogscan"
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/registry"
 	"github.com/otterXf/otter/pkg/routes"
 	"github.com/otterXf/otter/pkg/sbomindex"
@@ -65,6 +66,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("build registry manager: %v", err)
 	}
+	policyEngine, err := buildPolicyEngine()
+	if err != nil {
+		log.Fatalf("build policy engine: %v", err)
+	}
 	auditRecorder, err := buildAuditRecorder()
 	if err != nil {
 		log.Fatalf("build audit recorder: %v", err)
@@ -77,6 +82,7 @@ func main() {
 	catalogScanConfig := catalogscan.ConfigFromEnv()
 	scanHandler := api.NewScanHandlerWithRegistry(store, sbomRepository, vulnerabilityRepository, analyzer, registryManager)
 	scanHandler.SetAuditRecorder(auditRecorder)
+	scanHandler.SetPolicyEngine(policyEngine)
 	jobQueue, err := catalogscan.NewQueue(scanHandler, catalogScanConfig, log.Default())
 	if err != nil {
 		log.Fatalf("build catalog scan queue: %v", err)
@@ -218,6 +224,10 @@ func buildAuthenticator() (*auth.Authenticator, error) {
 		return nil, err
 	}
 	return auth.NewAuthenticator(cfg)
+}
+
+func buildPolicyEngine() (*policy.Engine, error) {
+	return policy.NewEngine(policy.ConfigFromEnv())
 }
 
 func buildAuditRecorder() (audit.Recorder, error) {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/vulnindex"
 )
@@ -15,7 +16,8 @@ func TestMarshalVulnerabilitiesCSV(t *testing.T) {
 	t.Parallel()
 
 	record := testVulnerabilityRecord()
-	document, err := MarshalVulnerabilitiesCSV(record)
+	evaluation := testPolicyEvaluation()
+	document, err := MarshalVulnerabilitiesCSV(record, &evaluation)
 	if err != nil {
 		t.Fatalf("MarshalVulnerabilitiesCSV() error = %v", err)
 	}
@@ -36,13 +38,20 @@ func TestMarshalVulnerabilitiesCSV(t *testing.T) {
 	if got, want := rows[1][9], "1.36.2-r1|1.36.3-r0"; got != want {
 		t.Fatalf("row fix_versions = %q, want %q", got, want)
 	}
+	if got, want := rows[1][17], policy.ModeEnforce; got != want {
+		t.Fatalf("row policy_mode = %q, want %q", got, want)
+	}
+	if got, want := rows[1][18], policy.StatusFail; got != want {
+		t.Fatalf("row policy_status = %q, want %q", got, want)
+	}
 }
 
 func TestMarshalVulnerabilitiesSARIF(t *testing.T) {
 	t.Parallel()
 
 	record := testVulnerabilityRecord()
-	document, err := MarshalVulnerabilitiesSARIF(record)
+	evaluation := testPolicyEvaluation()
+	document, err := MarshalVulnerabilitiesSARIF(record, &evaluation)
 	if err != nil {
 		t.Fatalf("MarshalVulnerabilitiesSARIF() error = %v", err)
 	}
@@ -50,6 +59,12 @@ func TestMarshalVulnerabilitiesSARIF(t *testing.T) {
 	var payload struct {
 		Version string `json:"version"`
 		Runs    []struct {
+			Properties struct {
+				Policy struct {
+					Mode   string `json:"mode"`
+					Status string `json:"status"`
+				} `json:"policy"`
+			} `json:"properties"`
 			Results []struct {
 				RuleID    string `json:"ruleId"`
 				Level     string `json:"level"`
@@ -93,13 +108,17 @@ func TestMarshalVulnerabilitiesSARIF(t *testing.T) {
 	if payload.Runs[0].Results[0].PartialFingerprints["primaryLocationLineHash"] == "" {
 		t.Fatal("expected primaryLocationLineHash fingerprint")
 	}
+	if got, want := payload.Runs[0].Properties.Policy.Status, policy.StatusFail; got != want {
+		t.Fatalf("run policy status = %q, want %q", got, want)
+	}
 }
 
 func TestMarshalVulnerabilitiesJSON(t *testing.T) {
 	t.Parallel()
 
 	record := testVulnerabilityRecord()
-	document, err := MarshalVulnerabilitiesJSON(record)
+	evaluation := testPolicyEvaluation()
+	document, err := MarshalVulnerabilitiesJSON(record, &evaluation)
 	if err != nil {
 		t.Fatalf("MarshalVulnerabilitiesJSON() error = %v", err)
 	}
@@ -113,6 +132,19 @@ func TestMarshalVulnerabilitiesJSON(t *testing.T) {
 	}
 	if got := payload["vulnerabilities"]; got == nil {
 		t.Fatal("expected vulnerabilities array")
+	}
+	if got := payload["policy"]; got == nil {
+		t.Fatal("expected policy block")
+	}
+}
+
+func testPolicyEvaluation() policy.Evaluation {
+	return policy.Evaluation{
+		Enabled: true,
+		Mode:    policy.ModeEnforce,
+		Status:  policy.StatusFail,
+		Allowed: false,
+		Summary: "1 of 1 policy checks failed",
 	}
 }
 

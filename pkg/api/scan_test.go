@@ -22,6 +22,7 @@ import (
 	"github.com/otterXf/otter/pkg/attestation"
 	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compliance"
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/sbomindex"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
@@ -75,6 +76,16 @@ func (s *stubJobQueue) Get(jobID string) (catalogscan.Job, bool) {
 
 func (s *stubJobQueue) Stats() catalogscan.QueueStats {
 	return s.stats
+}
+
+func mustPolicyEngine(t *testing.T, bundle policy.Bundle, mode string) *policy.Engine {
+	t.Helper()
+
+	engine, err := policy.NewEngineFromBundle(bundle, mode)
+	if err != nil {
+		t.Fatalf("policy.NewEngineFromBundle() error = %v", err)
+	}
+	return engine
 }
 
 func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.T) {
@@ -195,6 +206,98 @@ func TestGenerateScanSbomVulStoresCombinedAndStructuredSBOMArtifacts(t *testing.
 	}
 	if !bytes.Contains(resp.Body.Bytes(), []byte(`"platform":"linux/amd64"`)) {
 		t.Fatalf("expected platform in response body, body=%s", resp.Body.String())
+	}
+}
+
+func TestGenerateScanSbomVulEnforceModeReturnsConflictOnPolicyFailure(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	baseDir := t.TempDir()
+	store, err := storage.NewLocalStore(filepath.Join(baseDir, "_store"))
+	if err != nil {
+		t.Fatalf("NewLocalStore() error = %v", err)
+	}
+	repo, err := sbomindex.NewLocalRepository(filepath.Join(baseDir, "_sbom_index"))
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+	vulnRepo, err := vulnindex.NewLocalRepository(filepath.Join(baseDir, "_vulnerability_index"))
+	if err != nil {
+		t.Fatalf("NewLocalRepository() error = %v", err)
+	}
+
+	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{
+		result: scan.AnalysisResult{
+			ImageRef:         "alpine:latest",
+			SBOMDocument:     []byte(testCycloneDXDocument),
+			SBOMSPDXDocument: []byte(testSPDXDocument),
+			SBOMData:         testSyftSBOM(),
+			CombinedReport: scan.CombinedVulnerabilityReport{
+				ImageRef: "alpine:latest",
+				Summary:  scan.VulnerabilitySummary{Total: 1, Fixable: 1},
+				Vulnerabilities: []scan.VulnerabilityFinding{{
+					ID:             "CVE-2024-0001",
+					Severity:       "HIGH",
+					PackageName:    "busybox",
+					PackageVersion: "1.36.1",
+					FixVersion:     "1.36.2",
+					Scanners:       []string{"grype"},
+				}},
+			},
+			CombinedVulnerabilities: []byte(`{"schema_version":"v1alpha1"}`),
+			Summary:                 scan.VulnerabilitySummary{Total: 1},
+			ScannerReports:          []scan.ScannerReport{{Scanner: "grype", ContentType: "application/json", Document: []byte(`[{"id":"CVE-2024-0001"}]`)}},
+		},
+	})
+	handler.SetPolicyEngine(mustPolicyEngine(t, policy.Bundle{
+		Name: "default",
+		Policies: []policy.Policy{{
+			ID:          "no-high",
+			MaxSeverity: "HIGH",
+		}},
+	}, policy.ModeEnforce))
+
+	router := gin.New()
+	router.POST("/api/v1/scans", handler.GenerateScanSbomVul)
+
+	body, err := json.Marshal(ImageGeneratePayload{
+		ImageName: "alpine:latest",
+		OrgID:     "demo-org",
+		ImageID:   "demo-image",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/scans", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got, want := resp.Code, http.StatusConflict; got != want {
+		t.Fatalf("status = %d, want %d, body=%s", got, want, resp.Body.String())
+	}
+
+	var payload struct {
+		Policy struct {
+			Mode    string `json:"mode"`
+			Status  string `json:"status"`
+			Allowed bool   `json:"allowed"`
+		} `json:"policy"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got, want := payload.Policy.Mode, policy.ModeEnforce; got != want {
+		t.Fatalf("policy.mode = %q, want %q", got, want)
+	}
+	if got, want := payload.Policy.Status, policy.StatusFail; got != want {
+		t.Fatalf("policy.status = %q, want %q", got, want)
+	}
+	if payload.Policy.Allowed {
+		t.Fatal("expected policy to block the scan response")
 	}
 }
 
@@ -948,6 +1051,13 @@ func TestGetImageOverviewReturnsTagsAndFiles(t *testing.T) {
 	}
 
 	handler := NewScanHandler(store, repo, vulnRepo, stubAnalyzer{})
+	handler.SetPolicyEngine(mustPolicyEngine(t, policy.Bundle{
+		Name: "default",
+		Policies: []policy.Policy{{
+			ID:          "no-high",
+			MaxSeverity: "HIGH",
+		}},
+	}, policy.ModeReport))
 	router := gin.New()
 	router.GET("/api/v1/images/:id/overview", handler.GetImageOverview)
 
@@ -977,6 +1087,9 @@ func TestGetImageOverviewReturnsTagsAndFiles(t *testing.T) {
 	}
 	if got, want := payload.Tags[0].Platform, "linux/arm64"; got != want {
 		t.Fatalf("payload.Tags[0].Platform = %q, want %q", got, want)
+	}
+	if got, want := payload.Policy.Status, policy.StatusFail; got != want {
+		t.Fatalf("payload.Policy.Status = %q, want %q", got, want)
 	}
 }
 
@@ -1032,6 +1145,13 @@ func TestGetImageVulnerabilitiesFiltersSeverity(t *testing.T) {
 	}
 
 	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	handler.SetPolicyEngine(mustPolicyEngine(t, policy.Bundle{
+		Name: "default",
+		Policies: []policy.Policy{{
+			ID:          "no-critical",
+			MaxSeverity: "CRITICAL",
+		}},
+	}, policy.ModeReport))
 	router := gin.New()
 	router.GET("/api/v1/images/:id/vulnerabilities", handler.GetImageVulnerabilities)
 
@@ -1053,12 +1173,18 @@ func TestGetImageVulnerabilitiesFiltersSeverity(t *testing.T) {
 		Vulnerabilities []struct {
 			ID string `json:"id"`
 		} `json:"vulnerabilities"`
+		Policy struct {
+			Status string `json:"status"`
+		} `json:"policy"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	if payload.Summary.Total != 1 || payload.SummaryAll.Total != 2 || payload.Vulnerabilities[0].ID != "CVE-2024-0001" {
 		t.Fatalf("payload = %#v", payload)
+	}
+	if got, want := payload.Policy.Status, policy.StatusFail; got != want {
+		t.Fatalf("payload.Policy.Status = %q, want %q", got, want)
 	}
 }
 
@@ -1142,6 +1268,13 @@ func TestExportImageSupportsSBOMAndVulnerabilityFormats(t *testing.T) {
 	}
 
 	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	handler.SetPolicyEngine(mustPolicyEngine(t, policy.Bundle{
+		Name: "default",
+		Policies: []policy.Policy{{
+			ID:          "no-high",
+			MaxSeverity: "HIGH",
+		}},
+	}, policy.ModeEnforce))
 	router := gin.New()
 	router.GET("/api/v1/images/:id/export", handler.ExportImage)
 
@@ -1205,8 +1338,17 @@ func TestExportImageSupportsSBOMAndVulnerabilityFormats(t *testing.T) {
 			if got := resp.Header().Get("Content-Disposition"); !strings.Contains(got, tc.wantDispositionPart) {
 				t.Fatalf("Content-Disposition = %q, want substring %q", got, tc.wantDispositionPart)
 			}
+			if got, want := resp.Header().Get("X-Otter-Policy-Mode"), policy.ModeEnforce; got != want {
+				t.Fatalf("X-Otter-Policy-Mode = %q, want %q", got, want)
+			}
+			if got, want := resp.Header().Get("X-Otter-Policy-Status"), policy.StatusFail; got != want {
+				t.Fatalf("X-Otter-Policy-Status = %q, want %q", got, want)
+			}
 			if got := resp.Body.String(); !strings.Contains(got, tc.wantBodyPart) {
 				t.Fatalf("body = %q, want substring %q", got, tc.wantBodyPart)
+			}
+			if tc.name == "json" && !strings.Contains(resp.Body.String(), `"policy":`) {
+				t.Fatalf("json export missing policy block: %s", resp.Body.String())
 			}
 		})
 	}
@@ -1272,6 +1414,14 @@ func TestGetImageAttestationsReturnsRegistryData(t *testing.T) {
 	}
 
 	handler := NewScanHandler(store, sbomRepo, vulnRepo, stubAnalyzer{})
+	handler.SetPolicyEngine(mustPolicyEngine(t, policy.Bundle{
+		Name: "default",
+		Policies: []policy.Policy{{
+			ID:                    "signed-and-provenance",
+			MinVerifiedSignatures: 1,
+			MinVerifiedProvenance: 1,
+		}},
+	}, policy.ModeReport))
 	handler.attestor = stubAttestationFetcher{
 		result: attestation.Result{
 			CanonicalRef: "ghcr.io/example/demo@sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -1327,6 +1477,9 @@ func TestGetImageAttestationsReturnsRegistryData(t *testing.T) {
 		Attestations []struct {
 			PredicateType string `json:"predicate_type"`
 		} `json:"attestations"`
+		Policy struct {
+			Status string `json:"status"`
+		} `json:"policy"`
 	}
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
@@ -1342,6 +1495,9 @@ func TestGetImageAttestationsReturnsRegistryData(t *testing.T) {
 	}
 	if got, want := payload.Summary.Provenance, 1; got != want {
 		t.Fatalf("Summary.Provenance = %d, want %d", got, want)
+	}
+	if got, want := payload.Policy.Status, policy.StatusPass; got != want {
+		t.Fatalf("payload.Policy.Status = %q, want %q", got, want)
 	}
 }
 

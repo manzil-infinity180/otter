@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/vulnindex"
 )
 
@@ -28,10 +29,11 @@ type vulnerabilityDocument struct {
 	FixRecommendations []vulnindex.FixRecommendation   `json:"fix_recommendations"`
 	Trend              []vulnindex.TrendPoint          `json:"trend,omitempty"`
 	VEXDocuments       []vulnindex.VEXDocumentRecord   `json:"vex_documents,omitempty"`
+	Policy             *policy.Evaluation              `json:"policy,omitempty"`
 	UpdatedAt          string                          `json:"updated_at"`
 }
 
-func MarshalVulnerabilitiesJSON(record vulnindex.Record) ([]byte, error) {
+func MarshalVulnerabilitiesJSON(record vulnindex.Record, evaluation *policy.Evaluation) ([]byte, error) {
 	document := vulnerabilityDocument{
 		OrgID:              record.OrgID,
 		ImageID:            record.ImageID,
@@ -41,6 +43,7 @@ func MarshalVulnerabilitiesJSON(record vulnindex.Record) ([]byte, error) {
 		FixRecommendations: record.FixRecommendations,
 		Trend:              record.Trend,
 		VEXDocuments:       record.VEXDocuments,
+		Policy:             evaluation,
 		UpdatedAt:          record.UpdatedAt.UTC().Format(timeLayoutRFC3339),
 	}
 	payload, err := json.MarshalIndent(document, "", "  ")
@@ -50,7 +53,7 @@ func MarshalVulnerabilitiesJSON(record vulnindex.Record) ([]byte, error) {
 	return payload, nil
 }
 
-func MarshalVulnerabilitiesCSV(record vulnindex.Record) ([]byte, error) {
+func MarshalVulnerabilitiesCSV(record vulnindex.Record, evaluation *policy.Evaluation) ([]byte, error) {
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 
@@ -72,6 +75,9 @@ func MarshalVulnerabilitiesCSV(record vulnindex.Record) ([]byte, error) {
 		"last_seen_at",
 		"advisory_document_id",
 		"advisory_status_notes",
+		"policy_mode",
+		"policy_status",
+		"policy_allowed",
 	}
 	if err := writer.Write(header); err != nil {
 		return nil, fmt.Errorf("write csv header: %w", err)
@@ -103,6 +109,9 @@ func MarshalVulnerabilitiesCSV(record vulnindex.Record) ([]byte, error) {
 			vulnerability.LastSeenAt.UTC().Format(timeLayoutRFC3339),
 			advisoryDocumentID,
 			advisoryStatusNotes,
+			policyField(evaluation, "mode"),
+			policyField(evaluation, "status"),
+			policyField(evaluation, "allowed"),
 		}
 		if err := writer.Write(row); err != nil {
 			return nil, fmt.Errorf("write csv row: %w", err)
@@ -116,7 +125,7 @@ func MarshalVulnerabilitiesCSV(record vulnindex.Record) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func MarshalVulnerabilitiesSARIF(record vulnindex.Record) ([]byte, error) {
+func MarshalVulnerabilitiesSARIF(record vulnindex.Record, evaluation *policy.Evaluation) ([]byte, error) {
 	rulesByID := make(map[string]sarifRule, len(record.Vulnerabilities))
 	for _, vulnerability := range record.Vulnerabilities {
 		if _, ok := rulesByID[vulnerability.ID]; ok {
@@ -203,6 +212,9 @@ func MarshalVulnerabilitiesSARIF(record vulnindex.Record) ([]byte, error) {
 				AutomationDetails: sarifAutomationDetails{
 					ID: fmt.Sprintf("otter/container-image/%s/%s", record.OrgID, record.ImageID),
 				},
+				Properties: sarifRunProperties{
+					Policy: evaluation,
+				},
 				Tool: sarifTool{
 					Driver: sarifDriver{
 						Name:           "otter",
@@ -232,8 +244,13 @@ type sarifReport struct {
 
 type sarifRun struct {
 	AutomationDetails sarifAutomationDetails `json:"automationDetails,omitempty"`
+	Properties        sarifRunProperties     `json:"properties,omitempty"`
 	Tool              sarifTool              `json:"tool"`
 	Results           []sarifResult          `json:"results"`
+}
+
+type sarifRunProperties struct {
+	Policy *policy.Evaluation `json:"policy,omitempty"`
 }
 
 type sarifAutomationDetails struct {
@@ -328,6 +345,25 @@ func formatCVSS(vulnerability vulnindex.VulnerabilityRecord) string {
 		parts = append(parts, fmt.Sprintf("%s=%.1f", label, score.Score))
 	}
 	return strings.Join(parts, "|")
+}
+
+func policyField(evaluation *policy.Evaluation, field string) string {
+	if evaluation == nil {
+		return ""
+	}
+	switch field {
+	case "mode":
+		return evaluation.Mode
+	case "status":
+		return evaluation.Status
+	case "allowed":
+		if evaluation.Allowed {
+			return "true"
+		}
+		return "false"
+	default:
+		return ""
+	}
 }
 
 func chooseDescription(values ...string) string {

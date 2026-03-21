@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/scan"
 	"github.com/otterXf/otter/pkg/storage"
 )
@@ -56,6 +57,7 @@ type Result struct {
 	Platform    string                    `json:"platform,omitempty"`
 	Scanners    []string                  `json:"scanners,omitempty"`
 	Summary     scan.VulnerabilitySummary `json:"summary"`
+	Policy      policy.Evaluation         `json:"policy"`
 	CompletedAt time.Time                 `json:"completed_at"`
 }
 

@@ -34,6 +34,8 @@ Useful environment variables:
 - `OTTER_AUDIT_ENABLED`
 - `OTTER_AUDIT_OUTPUTS`
 - `OTTER_AUDIT_FILE`
+- `OTTER_POLICY_BUNDLE`
+- `OTTER_POLICY_MODE`
 - `OTTER_POSTGRES_DSN`
 - `OTTER_POSTGRES_MIGRATIONS`
 - `OTTER_TRIVY_ENABLED`
@@ -94,6 +96,25 @@ When explicit registry credentials are configured, Otter stores registry metadat
 
 Otter now emits structured JSON-line audit records for scan queueing and completion, scan deletion, SBOM and VEX imports, and registry configuration changes. By default it appends them to `./data/_audit/events.jsonl`. Set `OTTER_AUDIT_OUTPUTS=stdout`, `stderr`, or a comma-separated mix such as `file,stdout` to forward them into your log pipeline; override the file path with `OTTER_AUDIT_FILE`, or disable audit output with `OTTER_AUDIT_ENABLED=false`.
 
+Otter can also evaluate scans against a JSON or YAML policy bundle. Set `OTTER_POLICY_BUNDLE` to a bundle file and choose `OTTER_POLICY_MODE=report` or `enforce`. In `report` mode, scan and image APIs return an additive `policy` gate summary. In `enforce` mode, synchronous `POST /api/v1/scans` still stores the scan but returns `409 Conflict` when the gate fails.
+
+Example bundle:
+
+```yaml
+name: default-gates
+version: 1
+mode: enforce
+policies:
+  - id: no-critical
+    title: Block critical vulnerabilities
+    max_severity: CRITICAL
+  - id: trusted-scanners
+    allowed_scanners: [grype, trivy]
+  - id: signed-provenance
+    min_verified_signatures: 1
+    min_verified_provenance: 1
+```
+
 The background catalog worker is enabled by default and seeds the local catalog with common base images under the `catalog` org. Disable it with `OTTER_CATALOG_SCANNER_ENABLED=false` if you only want manual scans.
 
 Build and test the React frontend:
@@ -142,12 +163,14 @@ The vulnerability response includes:
 - summary counts by severity, scanner, and advisory status
 - fix recommendations grouped by affected package
 - trend snapshots preserved across re-scans
+- additive `policy` gate results for the current image
 
 The attestation response includes:
 
 - signatures discovered through OCI referrers plus `cosign verify` status
 - in-toto and DSSE attestations with parsed SLSA provenance summaries
 - signer, issuer, timestamp, predicate type, and statement subjects when present
+- additive `policy` gate results when a bundle requires signature or provenance checks
 
 The compliance response includes:
 
@@ -200,6 +223,8 @@ Export formats are available from the image detail UI and the REST API:
 
 - `GET /api/v1/images/:id/export?org_id=...&format=cyclonedx|spdx|json|csv|sarif`
 - `GET /api/v1/comparisons/:id/export`
+
+Image exports also include `X-Otter-Policy-Mode`, `X-Otter-Policy-Status`, and `X-Otter-Policy-Allowed` headers so downstream automation can read the gate result without changing the exported filename or primary payload format.
 
 
 

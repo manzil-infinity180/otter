@@ -21,6 +21,7 @@ import (
 	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compare"
 	"github.com/otterXf/otter/pkg/compliance"
+	"github.com/otterXf/otter/pkg/policy"
 	"github.com/otterXf/otter/pkg/registry"
 	reportexport "github.com/otterXf/otter/pkg/reportexport"
 	"github.com/otterXf/otter/pkg/sbomindex"
@@ -62,6 +63,7 @@ type ScanHandler struct {
 	registry   registry.Service
 	jobs       scanJobQueue
 	auditor    audit.Recorder
+	policy     *policy.Engine
 }
 
 type scanJobQueue interface {
@@ -98,6 +100,7 @@ type ScanExecutionResult struct {
 	Vulnerabilities ScanVulnerabilitySummary  `json:"vulnerabilities"`
 	Scanners        []string                  `json:"scanners,omitempty"`
 	Files           map[string]ObjectResponse `json:"files,omitempty"`
+	Policy          policy.Evaluation         `json:"policy"`
 }
 
 func NewScanHandler(store storage.Store, sbomIndex sbomindex.Repository, vulnIndex vulnindex.Repository, analyzer scan.ImageAnalyzer) *ScanHandler {
@@ -117,6 +120,7 @@ func NewScanHandlerWithRegistry(store storage.Store, sbomIndex sbomindex.Reposit
 		compliance: compliance.NewService(compliance.ConfigFromEnv()),
 		registry:   registryService,
 		auditor:    audit.NewNopRecorder(),
+		policy:     policy.NewDisabledEngine(),
 	}
 }
 
@@ -238,8 +242,14 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 			"platform":        result.Platform,
 			"source":          catalogscan.SourceAPI,
 			"trigger":         catalogscan.TriggerManual,
+			"policy_mode":     result.Policy.Mode,
+			"policy_status":   result.Policy.Status,
 		},
 	})
+	if result.Policy.Mode == policy.ModeEnforce && !result.Policy.Allowed {
+		c.JSON(http.StatusConflict, result)
+		return
+	}
 	c.JSON(http.StatusOK, result)
 }
 
@@ -310,6 +320,7 @@ func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Re
 		Platform:    result.Platform,
 		Scanners:    append([]string(nil), result.Scanners...),
 		Summary:     result.Summary,
+		Policy:      result.Policy,
 		CompletedAt: time.Now().UTC(),
 	}
 	h.recordAuditEvent(ctx, audit.Event{
@@ -330,6 +341,8 @@ func (h *ScanHandler) ExecuteCatalogScan(ctx context.Context, req catalogscan.Re
 			"source":          req.Source,
 			"trigger":         req.Trigger,
 			"storage_backend": h.store.Backend(),
+			"policy_mode":     result.Policy.Mode,
+			"policy_status":   result.Policy.Status,
 		},
 	})
 
@@ -561,6 +574,7 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		},
 		Scanners: scanners,
 		Files:    storedFiles,
+		Policy:   h.evaluatePolicy(ctx, orgID, imageID, payload.ImageName, &vulnerabilityRecord, nil, nil),
 	}, nil
 }
 
@@ -737,6 +751,11 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 
 	switch format {
 	case sbomindex.FormatCycloneDX, sbomindex.FormatSPDX:
+		record, recordErr := h.loadPolicyVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+		if recordErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load policy export context: %v", recordErr)})
+			return
+		}
 		keyBuilder := ArtifactKeyBuilder{OrgID: orgID, ImageID: imageID}
 		object, err := h.getSBOMArtifact(c.Request.Context(), keyBuilder, format)
 		if err != nil {
@@ -757,6 +776,12 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 		if contentType == "" {
 			contentType = "application/json"
 		}
+		imageName := strings.TrimSpace(object.Info.Metadata["image_name"])
+		if imageName == "" {
+			imageName, _ = h.resolveStoredImageReference(c.Request.Context(), orgID, imageID)
+		}
+		policyEvaluation := h.evaluatePolicy(c.Request.Context(), orgID, imageID, imageName, record, nil, nil)
+		writePolicyHeaders(c.Writer.Header(), policyEvaluation)
 		writeAttachment(c, filename, contentType, object.Data)
 		return
 	case reportexport.FormatCSV, reportexport.FormatJSON, reportexport.FormatSARIF:
@@ -769,6 +794,7 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load vulnerability export: %v", err)})
 			return
 		}
+		policyEvaluation := h.evaluatePolicy(c.Request.Context(), orgID, imageID, record.ImageName, &record, nil, nil)
 
 		var (
 			document    []byte
@@ -776,13 +802,13 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 		)
 		switch format {
 		case reportexport.FormatCSV:
-			document, err = reportexport.MarshalVulnerabilitiesCSV(record)
+			document, err = reportexport.MarshalVulnerabilitiesCSV(record, &policyEvaluation)
 			contentType = "text/csv; charset=utf-8"
 		case reportexport.FormatSARIF:
-			document, err = reportexport.MarshalVulnerabilitiesSARIF(record)
+			document, err = reportexport.MarshalVulnerabilitiesSARIF(record, &policyEvaluation)
 			contentType = "application/sarif+json"
 		default:
-			document, err = reportexport.MarshalVulnerabilitiesJSON(record)
+			document, err = reportexport.MarshalVulnerabilitiesJSON(record, &policyEvaluation)
 			contentType = "application/json"
 		}
 		if err != nil {
@@ -795,6 +821,7 @@ func (h *ScanHandler) ExportImage(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		writePolicyHeaders(c.Writer.Header(), policyEvaluation)
 		writeAttachment(c, filename, contentType, document)
 		return
 	default:
@@ -890,7 +917,14 @@ func (h *ScanHandler) GetImageSBOM(c *gin.Context) {
 		"dependency_roots": record.DependencyRoots,
 		"dependency_tree":  record.DependencyTree,
 		"document":         json.RawMessage(object.Data),
-		"updated_at":       record.UpdatedAt,
+		"policy": func() policy.Evaluation {
+			vulnerabilities, err := h.loadPolicyVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+			if err != nil {
+				return h.evaluatePolicy(c.Request.Context(), orgID, imageID, record.ImageName, nil, nil, err)
+			}
+			return h.evaluatePolicy(c.Request.Context(), orgID, imageID, record.ImageName, vulnerabilities, nil, nil)
+		}(),
+		"updated_at": record.UpdatedAt,
 	})
 }
 
@@ -1114,6 +1148,7 @@ func (h *ScanHandler) GetImageVulnerabilities(c *gin.Context) {
 		"vulnerabilities":     filtered.Vulnerabilities,
 		"trend":               filtered.Trend,
 		"vex_documents":       filtered.VEXDocuments,
+		"policy":              h.evaluatePolicy(c.Request.Context(), orgID, imageID, record.ImageName, &record, nil, nil),
 		"updated_at":          filtered.UpdatedAt,
 	}
 	if c.Query("severity") != "" || c.Query("status") != "" {
@@ -1159,7 +1194,14 @@ func (h *ScanHandler) GetImageAttestations(c *gin.Context) {
 		"summary":         result.Summary,
 		"signatures":      result.Signatures,
 		"attestations":    result.Attestations,
-		"updated_at":      result.UpdatedAt,
+		"policy": func() policy.Evaluation {
+			vulnerabilities, err := h.loadPolicyVulnerabilityRecord(c.Request.Context(), orgID, imageID)
+			if err != nil {
+				return h.evaluatePolicy(c.Request.Context(), orgID, imageID, imageRef, nil, &result, err)
+			}
+			return h.evaluatePolicy(c.Request.Context(), orgID, imageID, imageRef, vulnerabilities, &result, nil)
+		}(),
+		"updated_at": result.UpdatedAt,
 	})
 }
 

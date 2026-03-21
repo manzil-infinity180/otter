@@ -24,10 +24,33 @@ Recommended reading order for a future agent:
 The feature delivery track for Otter is complete, and the audit-remediation track is now in progress.
 
 - Product stories `OTTER-001` through `OTTER-013` remain complete.
-- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-11` are complete.
+- Audit stories `OTTER-AUDIT-01` through `OTTER-AUDIT-11` and `OTTER-AUDIT-14` are complete.
 - Additional `OTTER-AUDIT-*` stories remain open in `scripts/ralph/otter/prd.json`.
 
 ## Latest Audit Remediation
+
+### OTTER-AUDIT-14: add policy-as-code gate evaluation and enforce/report modes
+
+What changed:
+
+- added a new `pkg/policy` engine that loads JSON or YAML policy bundles from `OTTER_POLICY_BUNDLE`, normalizes rule configuration, and evaluates stored image data for severity thresholds, allowed scanners, verified signatures, and verified provenance requirements
+- wired policy evaluation into synchronous scan responses, async scan-job results, image overview, SBOM, vulnerability, and attestation APIs, keeping the response changes additive under a shared `policy` block
+- added synchronous gate enforcement for `OTTER_POLICY_MODE=enforce`, so `POST /api/v1/scans` now returns `409 Conflict` with the completed scan payload when the configured policy fails while leaving artifacts and indexes persisted for later review
+- extended image exports with policy status: deterministic export headers for every format, embedded policy results in vulnerability JSON and SARIF, and policy columns in vulnerability CSV
+- documented policy bundle configuration and API/export behavior in `Readme.md` and `docs/api.md`
+
+What was verified:
+
+- `go test ./pkg/policy ./pkg/reportexport ./pkg/api ./pkg/catalogscan`
+- `go test ./...`
+- `go vet ./...`
+- `go build ./...`
+
+Follow-up and rollout notes:
+
+- severity rules are VEX-aware when detailed vulnerability records are available and fall back to summary-level severity counts when only catalog or overview summaries exist
+- `OTTER_POLICY_MODE=enforce` only changes the synchronous scan HTTP status today; async jobs still complete successfully and surface the gate result in the stored job payload so schedulers do not retry deterministic policy failures
+- SBOM exports keep their raw SPDX/CycloneDX payloads unchanged for compatibility, with policy state exposed through `X-Otter-Policy-*` headers instead of mutating the document body
 
 ### OTTER-AUDIT-11: verify signatures and attestations per record
 
