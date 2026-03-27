@@ -13,6 +13,10 @@ type Config struct {
 	TrivyServerURL string
 	TrivyTimeout   time.Duration
 	TrivyScanners  []string
+
+	OSVEnabled bool
+	OSVBinary  string
+	OSVTimeout time.Duration
 }
 
 func ConfigFromEnv() Config {
@@ -48,12 +52,35 @@ func ConfigFromEnv() Config {
 		scanners = splitCSV(raw)
 	}
 
+	osvEnabled := false
+	if raw := strings.TrimSpace(os.Getenv("OTTER_OSV_ENABLED")); raw != "" {
+		if parsed, err := strconv.ParseBool(raw); err == nil {
+			osvEnabled = parsed
+		}
+	}
+
+	osvBinary := strings.TrimSpace(os.Getenv("OTTER_OSV_BINARY"))
+	if osvBinary == "" {
+		osvBinary = "osv-scanner"
+	}
+
+	osvTimeout := 5 * time.Minute
+	if raw := strings.TrimSpace(os.Getenv("OTTER_OSV_TIMEOUT")); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			osvTimeout = parsed
+		}
+	}
+
 	return Config{
 		TrivyEnabled:   enabled,
 		TrivyBinary:    binary,
 		TrivyServerURL: serverURL,
 		TrivyTimeout:   timeout,
 		TrivyScanners:  scanners,
+
+		OSVEnabled: osvEnabled,
+		OSVBinary:  osvBinary,
+		OSVTimeout: osvTimeout,
 	}
 }
 

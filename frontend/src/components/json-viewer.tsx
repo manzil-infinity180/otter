@@ -62,7 +62,7 @@ export function JSONViewer({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-ink-200 bg-white/90 dark:border-ink-800 dark:bg-ink-950/70">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-950">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-200 px-4 py-3 dark:border-ink-800">
         <div className="min-w-0">
           <p className="truncate font-medium text-ink-900 dark:text-white" title={filename}>
@@ -74,14 +74,14 @@ export function JSONViewer({
           <button
             type="button"
             onClick={() => setExpandedPaths(new Set(expandablePaths))}
-            className="rounded-xl border border-ink-200 px-3 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+            className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
           >
             Expand all
           </button>
           <button
             type="button"
             onClick={() => setExpandedPaths(new Set(["$"]))}
-            className="rounded-xl border border-ink-200 px-3 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+            className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
           >
             Collapse all
           </button>
@@ -90,12 +90,12 @@ export function JSONViewer({
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search keys or values"
-            className="w-56 rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-tide dark:border-ink-700 dark:bg-ink-950/70 dark:text-white"
+            className="w-56 rounded-md border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-900 outline-none transition focus:border-tide dark:border-ink-700 dark:bg-ink-900 dark:text-white"
           />
           <button
             type="button"
             onClick={() => void onCopy()}
-            className="rounded-xl border border-ink-200 px-3 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+            className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
           >
             {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy JSON"}
           </button>
@@ -104,14 +104,14 @@ export function JSONViewer({
 
       {deferredSearch ? (
         <div className="border-b border-ink-200 px-4 py-3 dark:border-ink-800">
-          <p className="text-xs uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">Search results</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-ink-500 dark:text-ink-400">Search results</p>
           <div className="mt-3 max-h-32 space-y-2 overflow-y-auto">
             {searchMatches.map((match) => (
               <button
                 key={match.path}
                 type="button"
                 onClick={() => onRevealPath(match.segments)}
-                className="block w-full rounded-xl border border-ink-200 px-3 py-2 text-left transition hover:border-sky-400 dark:border-ink-800 dark:hover:border-sky-600"
+                className="block w-full rounded-md border border-ink-200 px-3 py-2 text-left transition hover:border-tide dark:border-ink-800 dark:hover:border-sky-600"
               >
                 <p className="truncate text-sm font-medium text-ink-900 dark:text-white">{match.path}</p>
                 <p className="truncate text-xs text-ink-500 dark:text-ink-400">{match.preview}</p>
@@ -172,10 +172,10 @@ function JsonTreeNode({
       <button
         type="button"
         onClick={() => onToggle(path)}
-        className="flex w-full items-center gap-2 rounded-lg py-1 text-left leading-7 transition hover:bg-ink-100/70 dark:hover:bg-ink-900/60"
+        className="flex w-full items-center gap-2 rounded py-1 text-left leading-7 transition hover:bg-ink-100 dark:hover:bg-ink-900"
         style={indent}
       >
-        <span className="w-4 text-center text-ink-500 dark:text-ink-400">{isExpanded ? "−" : "+"}</span>
+        <span className="w-4 text-center text-ink-500 dark:text-ink-400">{isExpanded ? "-" : "+"}</span>
         {label !== "$" ? <span className="text-rose-700 dark:text-rose-300">{label}:</span> : null}
         <span className="text-ink-500 dark:text-ink-400">
           {compound.kind === "array" ? `Array(${compound.entries.length})` : `Object(${compound.entries.length})`}
@@ -199,7 +199,7 @@ function JsonTreeNode({
             <button
               type="button"
               onClick={() => setVisibleChildren((current) => current + 50)}
-              className="ml-4 mt-1 rounded-lg px-3 py-1 text-xs text-tide transition hover:text-sky-600 dark:hover:text-sky-300"
+              className="ml-4 mt-1 rounded px-3 py-1 text-xs text-tide transition hover:text-sky-600 dark:hover:text-sky-300"
             >
               Show 50 more
             </button>

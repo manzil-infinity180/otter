@@ -39,26 +39,26 @@ export function severityTone(severity: Severity) {
     case "CRITICAL":
       return "bg-rose/15 text-rose ring-1 ring-inset ring-rose/30";
     case "HIGH":
-      return "bg-ember/15 text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:text-amber-300";
+      return "bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-300/50 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-500/30";
     case "MEDIUM":
-      return "bg-tide/15 text-sky-700 ring-1 ring-inset ring-sky-500/30 dark:text-sky-300";
+      return "bg-sky-100 text-sky-800 ring-1 ring-inset ring-sky-300/50 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-500/30";
     case "LOW":
-      return "bg-mint/15 text-emerald-700 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-300";
+      return "bg-emerald-100 text-emerald-800 ring-1 ring-inset ring-emerald-300/50 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-500/30";
     default:
-      return "bg-ink-200 text-ink-700 ring-1 ring-inset ring-ink-300 dark:bg-ink-800 dark:text-ink-200 dark:ring-ink-700";
+      return "bg-ink-100 text-ink-700 ring-1 ring-inset ring-ink-300 dark:bg-ink-800 dark:text-ink-200 dark:ring-ink-700";
   }
 }
 
 export function complianceTone(status: ComplianceStatus) {
   switch (status) {
     case "pass":
-      return "bg-mint/15 text-emerald-700 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-300";
+      return "bg-emerald-100 text-emerald-800 ring-1 ring-inset ring-emerald-300/50 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-500/30";
     case "partial":
-      return "bg-ember/15 text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:text-amber-300";
+      return "bg-amber-100 text-amber-800 ring-1 ring-inset ring-amber-300/50 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-500/30";
     case "fail":
       return "bg-rose/15 text-rose ring-1 ring-inset ring-rose/30";
     default:
-      return "bg-ink-200 text-ink-700 ring-1 ring-inset ring-ink-300 dark:bg-ink-800 dark:text-ink-200 dark:ring-ink-700";
+      return "bg-ink-100 text-ink-700 ring-1 ring-inset ring-ink-300 dark:bg-ink-800 dark:text-ink-200 dark:ring-ink-700";
   }
 }
 

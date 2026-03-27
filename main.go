@@ -205,6 +205,9 @@ func buildAnalyzer() scan.ImageAnalyzer {
 	if scanConfig.TrivyEnabled {
 		scanners = append(scanners, scan.NewTrivyScanner(scanConfig))
 	}
+	if scanConfig.OSVEnabled {
+		scanners = append(scanners, scan.NewOSVScanner(scanConfig))
+	}
 	return scan.NewAnalyzer(scan.SyftSBOMGenerator{}, scanners...)
 }
 

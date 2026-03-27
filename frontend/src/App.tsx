@@ -35,23 +35,23 @@ function Layout() {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-white/60 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-ink-900/70">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-4 sm:px-6 lg:px-8">
+      <header className="sticky top-0 z-30 border-b border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-950">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex items-center gap-4">
             <Link to="/" className="inline-flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-ink-900 font-display text-lg text-white shadow-haze dark:bg-tide">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink-900 font-display text-lg text-white dark:bg-tide">
                 O
               </span>
               <div>
-                <p className="font-display text-xl tracking-tight text-ink-900 dark:text-white">Otter</p>
-                <p className="text-sm text-ink-500 dark:text-ink-300">Container image analyzer</p>
+                <p className="font-display text-lg tracking-tight text-ink-900 dark:text-white">Otter</p>
+                <p className="text-xs text-ink-500 dark:text-ink-400">Container image analyzer</p>
               </div>
             </Link>
-            <nav className="hidden items-center gap-2 rounded-full border border-white/70 bg-white/70 p-1 text-sm shadow-haze dark:border-white/10 dark:bg-ink-900/85 md:flex">
+            <nav className="hidden items-center gap-1 text-sm md:flex">
               <NavLink
                 to="/"
                 className={({ isActive }) =>
-                  `rounded-full px-4 py-2 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
+                  `rounded-md px-3 py-1.5 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
                 }
               >
                 Home
@@ -59,7 +59,7 @@ function Layout() {
               <NavLink
                 to="/directory"
                 className={({ isActive }) =>
-                  `rounded-full px-4 py-2 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
+                  `rounded-md px-3 py-1.5 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
                 }
               >
                 Directory
@@ -67,14 +67,14 @@ function Layout() {
               <NavLink
                 to="/docs"
                 className={({ isActive }) =>
-                  `rounded-full px-4 py-2 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
+                  `rounded-md px-3 py-1.5 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
                 }
               >
                 Docs
               </NavLink>
               <a
                 href="/browse"
-                className="rounded-full px-4 py-2 text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"
+                className="rounded-md px-3 py-1.5 text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"
               >
                 HTML fallback
               </a>
@@ -83,7 +83,7 @@ function Layout() {
           <button
             type="button"
             onClick={toggleTheme}
-            className="rounded-full border border-ink-300 px-4 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+            className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
             aria-label="Toggle color mode"
           >
             {theme === "dark" ? "Light mode" : "Dark mode"}

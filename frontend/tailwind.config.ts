@@ -27,9 +27,6 @@ export default {
         tide: "#0ea5e9",
         mint: "#10b981",
         rose: "#f43f5e"
-      },
-      boxShadow: {
-        haze: "0 18px 40px rgba(15, 23, 42, 0.18)"
       }
     }
   },
