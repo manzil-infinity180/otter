@@ -79,22 +79,22 @@ export function DirectoryPage() {
   const hasFilters = Boolean(deferredQuery || severity);
 
   return (
-    <div className="space-y-8">
-      <section className="overflow-hidden rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze backdrop-blur-xl dark:border-white/10 dark:bg-ink-900/80 sm:p-8">
+    <div className="space-y-6">
+      <section className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900 sm:p-8">
         <div className="grid gap-8 xl:grid-cols-[1.15fr_0.85fr]">
           <div className="space-y-4">
-            <p className="text-sm uppercase tracking-[0.26em] text-tide">Universal container image scanning</p>
-            <h1 className="max-w-2xl font-display text-4xl tracking-tight text-ink-900 dark:text-white sm:text-5xl">
+            <p className="text-sm font-medium uppercase tracking-wider text-tide">Universal container image scanning</p>
+            <h1 className="max-w-2xl font-display text-3xl tracking-tight text-ink-900 dark:text-white sm:text-4xl">
               Scan any public image, then inspect SBOMs, vulnerabilities, and attestations in one place.
             </h1>
-            <p className="max-w-2xl text-base text-ink-600 dark:text-ink-300 sm:text-lg">
+            <p className="max-w-2xl text-base text-ink-600 dark:text-ink-300">
               Otter keeps the catalog for browsing, but manual scans are now first-class. Queue a new image, follow job status, and jump straight into the detail view when it finishes.
             </p>
           </div>
-          <div className="space-y-4 rounded-[1.75rem] border border-ink-200/80 bg-white/80 p-5 shadow-haze dark:border-ink-800 dark:bg-ink-950/50">
+          <div className="space-y-4 rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
             <div>
-              <p className="text-sm uppercase tracking-[0.22em] text-ink-500 dark:text-ink-400">Scan a new image</p>
-              <h2 className="mt-2 font-display text-2xl text-ink-900 dark:text-white">Start a public image scan</h2>
+              <p className="text-sm font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">Scan a new image</p>
+              <h2 className="mt-2 font-display text-xl text-ink-900 dark:text-white">Start a public image scan</h2>
               <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
                 Try <span className="font-medium">nginx:latest</span>, <span className="font-medium">ghcr.io/owner/repo:tag</span>, or <span className="font-medium">cgr.dev/chainguard/static:latest</span>.
               </p>
@@ -110,13 +110,13 @@ export function DirectoryPage() {
                 scanMutation.mutate(imageName);
               }}
             >
-              <label className="space-y-2">
+              <label className="space-y-1.5">
                 <span className="text-sm font-medium text-ink-600 dark:text-ink-300">Image reference</span>
                 <input
                   aria-label="Scan image"
                   value={scanInput}
                   onChange={(event) => setScanInput(event.target.value)}
-                  className="w-full rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-tide focus:ring-2 focus:ring-sky-200 dark:border-ink-700 dark:bg-ink-950/60 dark:text-white dark:focus:ring-sky-900"
+                  className="w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-tide focus:ring-1 focus:ring-tide dark:border-ink-700 dark:bg-ink-900 dark:text-white"
                   placeholder="nginx:latest"
                 />
               </label>
@@ -124,15 +124,15 @@ export function DirectoryPage() {
                 <button
                   type="submit"
                   disabled={scanMutation.isPending || !scanInput.trim()}
-                  className="rounded-2xl bg-ink-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-ink-900 dark:hover:bg-ink-100"
+                  className="rounded-md bg-ink-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-ink-900 dark:hover:bg-ink-100"
                 >
-                  {scanMutation.isPending ? "Queueing scan…" : "Scan image"}
+                  {scanMutation.isPending ? "Queueing scan..." : "Scan image"}
                 </button>
                 <p className="text-xs text-ink-500 dark:text-ink-400">Scans run asynchronously and land in the default org.</p>
               </div>
             </form>
             {scanMutation.isError ? (
-              <div className="rounded-2xl border border-rose/30 bg-rose/8 px-4 py-3 text-sm text-rose dark:text-rose/90">
+              <div className="rounded-md border border-rose/30 bg-rose/10 px-3 py-2 text-sm text-rose">
                 {formatScanError(scanMutation.error instanceof Error ? scanMutation.error.message : "The scan could not be queued.")}
               </div>
             ) : null}
@@ -148,11 +148,11 @@ export function DirectoryPage() {
       </section>
 
       {scanJobs.length ? (
-        <section className="rounded-[2rem] border border-white/60 bg-white/75 p-5 shadow-haze backdrop-blur dark:border-white/10 dark:bg-ink-900/80">
+        <section className="rounded-xl border border-ink-200 bg-white p-5 dark:border-ink-800 dark:bg-ink-900">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="font-display text-2xl text-ink-900 dark:text-white">Active scan jobs</h2>
-              <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">Job status refreshes automatically until each scan succeeds or fails.</p>
+              <h2 className="font-display text-xl text-ink-900 dark:text-white">Active scan jobs</h2>
+              <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">Job status refreshes automatically until each scan succeeds or fails.</p>
             </div>
             <button
               type="button"
@@ -162,7 +162,7 @@ export function DirectoryPage() {
               Clear completed
             </button>
           </div>
-          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
             {scanJobs.map((job) => (
               <ScanJobCard
                 key={job.id}
@@ -181,18 +181,18 @@ export function DirectoryPage() {
         </section>
       ) : null}
 
-      <section className="grid gap-4 rounded-[2rem] border border-white/60 bg-white/70 p-5 shadow-haze backdrop-blur dark:border-white/10 dark:bg-ink-900/80 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
-        <label className="space-y-2">
+      <section className="grid gap-4 rounded-xl border border-ink-200 bg-white p-5 dark:border-ink-800 dark:bg-ink-900 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
+        <label className="space-y-1.5">
           <span className="text-sm font-medium text-ink-600 dark:text-ink-300">Filter catalog</span>
           <input
             aria-label="Filter catalog"
             value={draftQuery}
             onChange={(event) => setDraftQuery(event.target.value)}
-            className="w-full rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-tide focus:ring-2 focus:ring-sky-200 dark:border-ink-700 dark:bg-ink-950/60 dark:text-white dark:focus:ring-sky-900"
+            className="w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-tide focus:ring-1 focus:ring-tide dark:border-ink-700 dark:bg-ink-900 dark:text-white"
             placeholder="alpine, chainguard/static, latest"
           />
         </label>
-        <label className="space-y-2">
+        <label className="space-y-1.5">
           <span className="text-sm font-medium text-ink-600 dark:text-ink-300">Minimum severity</span>
           <select
             aria-label="Filter by severity"
@@ -206,7 +206,7 @@ export function DirectoryPage() {
               }
               setSearchParams(next, { replace: true });
             }}
-            className="w-full rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-tide dark:border-ink-700 dark:bg-ink-950/60 dark:text-white"
+            className="w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-tide dark:border-ink-700 dark:bg-ink-900 dark:text-white"
           >
             {severityOptions.map((option) => (
               <option key={option || "all"} value={option}>
@@ -215,7 +215,7 @@ export function DirectoryPage() {
             ))}
           </select>
         </label>
-        <label className="space-y-2">
+        <label className="space-y-1.5">
           <span className="text-sm font-medium text-ink-600 dark:text-ink-300">Sort results</span>
           <select
             aria-label="Sort images"
@@ -225,7 +225,7 @@ export function DirectoryPage() {
               next.set("sort", event.target.value);
               setSearchParams(next, { replace: true });
             }}
-            className="w-full rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-tide dark:border-ink-700 dark:bg-ink-950/60 dark:text-white"
+            className="w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 outline-none transition focus:border-tide dark:border-ink-700 dark:bg-ink-900 dark:text-white"
           >
             {sortOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -237,8 +237,8 @@ export function DirectoryPage() {
       </section>
 
       {catalogQuery.isLoading ? (
-        <section className="rounded-[2rem] border border-white/60 bg-white/75 p-8 text-sm text-ink-600 shadow-haze dark:border-white/10 dark:bg-ink-900/80 dark:text-ink-300">
-          Loading the image directory…
+        <section className="rounded-xl border border-ink-200 bg-white p-8 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-900 dark:text-ink-300">
+          Loading the image directory...
         </section>
       ) : null}
 
@@ -265,42 +265,42 @@ export function DirectoryPage() {
           <Link
             key={`${item.org_id}/${item.image_id}`}
             to={`/images/${item.org_id}/${item.image_id}`}
-            className="group rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze transition hover:-translate-y-0.5 hover:border-tide dark:border-white/10 dark:bg-ink-900/80"
+            className="group rounded-xl border border-ink-200 bg-white p-5 transition hover:-translate-y-0.5 hover:border-tide dark:border-ink-800 dark:bg-ink-900"
           >
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 space-y-2">
-                <p className="truncate text-sm uppercase tracking-[0.22em] text-ink-500 dark:text-ink-400" title={item.registry}>
+              <div className="min-w-0 space-y-1">
+                <p className="truncate text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400" title={item.registry}>
                   {item.registry}
                 </p>
-                <h2 className="truncate font-display text-2xl tracking-tight text-ink-900 transition group-hover:text-tide dark:text-white">
+                <h2 className="truncate font-display text-xl tracking-tight text-ink-900 transition group-hover:text-tide dark:text-white">
                   {item.repository_path || item.image_name}
                 </h2>
                 <p className="truncate text-sm text-ink-600 dark:text-ink-300" title={item.image_name}>
                   {item.image_name}
                 </p>
               </div>
-              <div className="rounded-2xl bg-ink-900 px-3 py-2 text-right text-white dark:bg-white dark:text-ink-900">
-                <p className="text-xs uppercase tracking-[0.22em]">Updated</p>
+              <div className="rounded-md bg-ink-900 px-3 py-1.5 text-right text-white dark:bg-white dark:text-ink-900">
+                <p className="text-xs uppercase tracking-wider">Updated</p>
                 <p className="text-sm font-medium">{formatTimestamp(item.updated_at)}</p>
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              {item.tag ? <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">tag {item.tag}</span> : null}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {item.tag ? <span className="rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">tag {item.tag}</span> : null}
               {(item.scanners ?? []).map((scanner) => (
-                <span key={scanner} className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/70 dark:text-sky-200">
+                <span key={scanner} className="rounded-md bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/70 dark:text-sky-200">
                   {scanner}
                 </span>
               ))}
             </div>
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
               <StatCard label="Packages" value={item.package_count} />
               <StatCard label="Vulnerabilities" value={item.vulnerability_summary?.total ?? 0} />
               <StatCard label="Org / ID" value={item.org_id} detail={item.image_id} />
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-2">
+            <div className="mt-4 flex flex-wrap gap-2">
               {vulnerabilityChips(item.vulnerability_summary).map((chip) => (
                 <SeverityPill key={chip.severity} severity={chip.severity} count={chip.count} />
               ))}
@@ -349,27 +349,27 @@ function ScanJobCard({
   const statusTone = statusClasses(currentJob.status);
 
   return (
-    <article className="rounded-[1.75rem] border border-ink-200 bg-white/80 p-5 shadow-haze dark:border-ink-800 dark:bg-ink-950/50">
+    <article className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate font-display text-xl text-ink-900 dark:text-white" title={currentJob.request.image_name}>
+          <p className="truncate font-display text-lg text-ink-900 dark:text-white" title={currentJob.request.image_name}>
             {currentJob.request.image_name}
           </p>
           <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">{currentJob.request.org_id} / {currentJob.request.image_id}</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] ${statusTone}`}>
+        <span className={`rounded-md px-2.5 py-1 text-xs font-medium uppercase tracking-wide ${statusTone}`}>
           {currentJob.status}
         </span>
       </div>
 
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-ink-100 dark:bg-ink-800">
+      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-ink-100 dark:bg-ink-800">
         <div className={`h-full rounded-full transition-all ${progressBarClasses(currentJob.status)}`} style={{ width: progressWidth(currentJob.status) }} />
       </div>
 
       <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">{jobStatusMessage(currentJob)}</p>
 
       {currentJob.error ? (
-        <p className="mt-3 rounded-2xl border border-rose/30 bg-rose/8 px-3 py-2 text-sm text-rose dark:text-rose/90">
+        <p className="mt-3 rounded-md border border-rose/30 bg-rose/10 px-3 py-2 text-sm text-rose">
           {formatScanError(currentJob.error)}
         </p>
       ) : null}
@@ -380,9 +380,9 @@ function ScanJobCard({
 function statusClasses(status: ScanJobStatus) {
   switch (status) {
     case "succeeded":
-      return "bg-mint/10 text-emerald-700 dark:text-emerald-300";
+      return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
     case "failed":
-      return "bg-rose/10 text-rose dark:text-rose/90";
+      return "bg-rose/10 text-rose";
     case "running":
       return "bg-sky-100 text-sky-700 dark:bg-sky-950/70 dark:text-sky-200";
     default:

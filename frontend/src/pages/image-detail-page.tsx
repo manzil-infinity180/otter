@@ -183,7 +183,7 @@ export function ImageDetailPage() {
   const overview = overviewQuery.data;
 
   if (overviewQuery.isLoading) {
-    return <div className="rounded-[2rem] border border-white/60 bg-white/75 p-8 shadow-haze dark:border-white/10 dark:bg-ink-900/80">Loading image detail…</div>;
+    return <div className="rounded-xl border border-ink-200 bg-white p-8 dark:border-ink-800 dark:bg-ink-900">Loading image detail...</div>;
   }
 
   if (overviewQuery.isError || !overview) {
@@ -215,33 +215,33 @@ export function ImageDetailPage() {
 
   return (
     <>
-      <div className="space-y-8">
-        <section className="overflow-hidden rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze backdrop-blur dark:border-white/10 dark:bg-ink-900/80 sm:p-8">
+      <div className="space-y-6">
+        <section className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900 sm:p-8">
           <div className="flex flex-wrap items-start justify-between gap-6">
-            <div className="min-w-0 space-y-3">
+            <div className="min-w-0 space-y-2">
               <Link to="/directory" className="text-sm text-tide hover:text-sky-600 dark:hover:text-sky-300">
                 Back to directory
               </Link>
-              <p className="truncate text-sm uppercase tracking-[0.24em] text-ink-500 dark:text-ink-400" title={overview.registry}>
+              <p className="truncate text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400" title={overview.registry}>
                 {overview.registry}
               </p>
-              <h1 className="truncate font-display text-4xl tracking-tight text-ink-900 dark:text-white" title={overview.repository_path || overview.image_name}>
+              <h1 className="truncate font-display text-3xl tracking-tight text-ink-900 dark:text-white" title={overview.repository_path || overview.image_name}>
                 {overview.repository_path || overview.image_name}
               </h1>
               <p className="max-w-3xl truncate text-base text-ink-600 dark:text-ink-300" title={overview.image_name}>
                 {overview.image_name}
               </p>
               <div className="flex flex-wrap gap-2">
-                {overview.tag ? <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">tag {overview.tag}</span> : null}
+                {overview.tag ? <span className="rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">tag {overview.tag}</span> : null}
                 {(overview.scanners ?? []).map((scanner) => (
-                  <span key={scanner} className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/70 dark:text-sky-200">
+                  <span key={scanner} className="rounded-md bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/70 dark:text-sky-200">
                     {scanner}
                   </span>
                 ))}
               </div>
               {allTags.length > 1 ? (
-                <label className="block max-w-xs space-y-2">
-                  <span className="text-xs uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">Stored version</span>
+                <label className="block max-w-xs space-y-1.5">
+                  <span className="text-xs uppercase tracking-wide text-ink-500 dark:text-ink-400">Stored version</span>
                   <select
                     aria-label="Stored tag"
                     value={`${overview.org_id}/${overview.image_id}`}
@@ -249,7 +249,7 @@ export function ImageDetailPage() {
                       const [nextOrgId, nextImageId] = event.target.value.split("/");
                       navigate(`/images/${nextOrgId}/${nextImageId}`);
                     }}
-                    className="w-full rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 dark:border-ink-700 dark:bg-ink-950/60 dark:text-white"
+                    className="w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 dark:border-ink-700 dark:bg-ink-900 dark:text-white"
                   >
                     {allTags.map((tagItem) => (
                       <option key={`${tagItem.org_id}/${tagItem.image_id}`} value={`${tagItem.org_id}/${tagItem.image_id}`}>
@@ -260,30 +260,30 @@ export function ImageDetailPage() {
                 </label>
               ) : null}
             </div>
-            <div className="rounded-[1.75rem] bg-ink-900 px-5 py-4 text-white shadow-haze dark:bg-white dark:text-ink-900">
-              <p className="text-xs uppercase tracking-[0.24em]">Last indexed</p>
-              <p className="mt-2 font-display text-2xl">{formatTimestamp(overview.updated_at)}</p>
+            <div className="rounded-lg bg-ink-900 px-4 py-3 text-white dark:bg-white dark:text-ink-900">
+              <p className="text-xs uppercase tracking-wider">Last indexed</p>
+              <p className="mt-1 font-display text-xl">{formatTimestamp(overview.updated_at)}</p>
               <p className="mt-1 text-sm opacity-75">{overview.org_id} / {overview.image_id}</p>
             </div>
           </div>
 
-          <div className="mt-8 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+          <div className="mt-6 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
             <StatCard label="Packages" value={overview.package_count} />
             <StatCard label="Vulnerabilities" value={overview.vulnerability_summary.total} detail={`${overview.vulnerability_summary.fixable} fixable`} />
             <StatCard label="Artifacts" value={overview.files.length} detail={overview.storage_backend} />
             <StatCard label="Related tags" value={allTags.length} detail="Same repository" />
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             {vulnerabilityChips(overview.vulnerability_summary).map((chip) => (
               <SeverityPill key={chip.severity} severity={chip.severity} count={chip.count} />
             ))}
           </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
-          <aside className="rounded-[2rem] border border-white/60 bg-white/75 p-3 shadow-haze backdrop-blur dark:border-white/10 dark:bg-ink-900/80">
-            <div role="tablist" aria-orientation="vertical" className="flex gap-2 overflow-x-auto xl:flex-col">
+        <section className="grid gap-6 xl:grid-cols-[200px_minmax(0,1fr)]">
+          <aside className="rounded-xl border border-ink-200 bg-white p-2 dark:border-ink-800 dark:bg-ink-900">
+            <div role="tablist" aria-orientation="vertical" className="flex gap-1 overflow-x-auto xl:flex-col">
               {tabs.map((label) => {
                 const active = tab === label;
                 return (
@@ -300,9 +300,9 @@ export function ImageDetailPage() {
                       });
                     }}
                     className={clsx(
-                      "min-w-fit rounded-2xl px-4 py-3 text-left text-sm font-medium transition",
+                      "min-w-fit rounded-md px-3 py-2 text-left text-sm font-medium transition",
                       active
-                        ? "bg-ink-900 text-white shadow-haze dark:bg-white dark:text-ink-900"
+                        ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900"
                         : "text-ink-600 hover:bg-ink-100 hover:text-ink-900 dark:text-ink-300 dark:hover:bg-ink-800 dark:hover:text-white"
                     )}
                   >
@@ -316,8 +316,8 @@ export function ImageDetailPage() {
           <div className="min-w-0 space-y-6">
             {tab === "Overview" ? (
               <section className="grid gap-6">
-                <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                  <h2 className="font-display text-2xl text-ink-900 dark:text-white">Scan summary</h2>
+                <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                  <h2 className="font-display text-xl text-ink-900 dark:text-white">Scan summary</h2>
                   <div className="mt-5 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
                     <StatCard label="Registry" value={overview.registry || "local"} />
                     <StatCard label="Repository" value={overview.repository_path || overview.image_name} />
@@ -325,44 +325,44 @@ export function ImageDetailPage() {
                     <StatCard label="Unfixable" value={overview.vulnerability_summary.unfixable} />
                   </div>
                   <div className="mt-5 grid gap-3 lg:grid-cols-2">
-                    <div className="rounded-2xl border border-ink-200 bg-white/80 p-4 dark:border-ink-800 dark:bg-ink-950/50">
-                      <p className="text-xs uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">Full registry</p>
+                    <div className="rounded-lg border border-ink-200 bg-ink-50 p-4 dark:border-ink-800 dark:bg-ink-950">
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-500 dark:text-ink-400">Full registry</p>
                       <p className="mt-2 break-all text-sm font-medium text-ink-900 dark:text-white">{overview.registry || "local"}</p>
                     </div>
-                    <div className="rounded-2xl border border-ink-200 bg-white/80 p-4 dark:border-ink-800 dark:bg-ink-950/50">
-                      <p className="text-xs uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">Full repository</p>
+                    <div className="rounded-lg border border-ink-200 bg-ink-50 p-4 dark:border-ink-800 dark:bg-ink-950">
+                      <p className="text-xs font-medium uppercase tracking-wide text-ink-500 dark:text-ink-400">Full repository</p>
                       <p className="mt-2 break-all text-sm font-medium text-ink-900 dark:text-white">{overview.repository_path || overview.image_name}</p>
                     </div>
                   </div>
                   {scannerWarnings.length ? (
                     <div className="mt-5 space-y-3">
                       {scannerWarnings.map((warning) => (
-                        <div key={warning.scanner} className="rounded-2xl border border-amber-300/40 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                        <div key={warning.scanner} className="rounded-md border border-amber-300/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/20 dark:bg-amber-950/30 dark:text-amber-100">
                           <span className="font-medium">{warning.scanner} unavailable.</span> {warning.message}
                         </div>
                       ))}
                     </div>
                   ) : null}
                 </div>
-                <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
+                <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <h2 className="font-display text-2xl text-ink-900 dark:text-white">Compliance posture</h2>
+                      <h2 className="font-display text-xl text-ink-900 dark:text-white">Compliance posture</h2>
                       <p className="mt-2 max-w-3xl text-sm text-ink-600 dark:text-ink-300">
                         {complianceQuery.data?.scope_note ?? "Best-effort standards tracking based on provenance, signatures, vulnerabilities, and upstream project posture."}
                       </p>
                     </div>
                     {complianceQuery.data ? (
-                      <span className={clsx("rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em]", complianceTone(complianceQuery.data.summary.overall_status))}>
+                      <span className={clsx("rounded-md px-2.5 py-1 text-xs font-medium uppercase tracking-wide", complianceTone(complianceQuery.data.summary.overall_status))}>
                         {complianceQuery.data.summary.overall_status}
                       </span>
                     ) : null}
                   </div>
 
                   {complianceQuery.isLoading ? (
-                    <p className="mt-5 text-sm text-ink-500 dark:text-ink-400">Loading compliance signals…</p>
+                    <p className="mt-5 text-sm text-ink-500 dark:text-ink-400">Loading compliance signals...</p>
                   ) : complianceQuery.isError ? (
-                    <p className="mt-5 text-sm text-rose dark:text-rose/90">
+                    <p className="mt-5 text-sm text-rose">
                       {complianceQuery.error instanceof Error ? complianceQuery.error.message : "The compliance endpoint returned an error."}
                     </p>
                   ) : complianceQuery.data ? (
@@ -375,9 +375,9 @@ export function ImageDetailPage() {
                       </div>
 
                       <div className="grid gap-6 2xl:grid-cols-[1.1fr_0.9fr]">
-                        <div className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
+                        <div className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={clsx("rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em]", complianceTone(complianceQuery.data.slsa.status))}>
+                            <span className={clsx("rounded-md px-2.5 py-1 text-xs font-medium uppercase tracking-wide", complianceTone(complianceQuery.data.slsa.status))}>
                               SLSA {complianceQuery.data.slsa.level}
                             </span>
                             {complianceQuery.data.source_repository ? (
@@ -393,22 +393,22 @@ export function ImageDetailPage() {
                           </dl>
                           <div className="mt-4 flex flex-wrap gap-2">
                             {(complianceQuery.data.slsa.evidence ?? []).map((item) => (
-                              <span key={item} className="rounded-full bg-mint/10 px-3 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                              <span key={item} className="rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                                 {item}
                               </span>
                             ))}
                             {(complianceQuery.data.slsa.missing ?? []).map((item) => (
-                              <span key={item} className="rounded-full bg-rose/10 px-3 py-1 text-xs font-medium text-rose dark:text-rose/90">
+                              <span key={item} className="rounded-md bg-rose/10 px-2.5 py-1 text-xs font-medium text-rose">
                                 missing {item}
                               </span>
                             ))}
                           </div>
                         </div>
 
-                        <div className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
+                        <div className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
                           <div className="flex items-center justify-between gap-3">
-                            <h3 className="font-display text-xl text-ink-900 dark:text-white">OpenSSF Scorecard</h3>
-                            <span className={clsx("rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em]", complianceTone(complianceQuery.data.scorecard.status))}>
+                            <h3 className="font-display text-lg text-ink-900 dark:text-white">OpenSSF Scorecard</h3>
+                            <span className={clsx("rounded-md px-2.5 py-1 text-xs font-medium uppercase tracking-wide", complianceTone(complianceQuery.data.scorecard.status))}>
                               {complianceQuery.data.scorecard.status}
                             </span>
                           </div>
@@ -418,19 +418,19 @@ export function ImageDetailPage() {
                               : complianceQuery.data.scorecard.error || "Scorecard data unavailable."}
                           </p>
                           {!complianceQuery.data.scorecard.available ? (
-                            <div className="mt-4 rounded-2xl border border-ink-200 bg-white/80 p-4 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-950/50 dark:text-ink-300">
+                            <div className="mt-4 rounded-lg border border-ink-200 bg-white p-4 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-900 dark:text-ink-300">
                               Otter only shows OpenSSF Scorecard when it can infer a public GitHub repository from provenance or image metadata. For this image, no GitHub source evidence was discovered.
                             </div>
                           ) : null}
                           {complianceQuery.data.scorecard.available ? (
                             <div className="mt-4 space-y-3">
                               {(complianceQuery.data.scorecard.checks ?? []).slice(0, 5).map((check) => (
-                                <div key={check.name} className="rounded-2xl border border-ink-200 p-3 dark:border-ink-800">
+                                <div key={check.name} className="rounded-lg border border-ink-200 p-3 dark:border-ink-800">
                                   <div className="flex items-center justify-between gap-3">
                                     <p className="font-medium text-ink-900 dark:text-white">{check.name}</p>
                                     <span className="text-sm text-ink-600 dark:text-ink-300">{check.score}/10</span>
                                   </div>
-                                  {check.reason ? <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">{check.reason}</p> : null}
+                                  {check.reason ? <p className="mt-1 text-xs text-ink-500 dark:text-ink-400">{check.reason}</p> : null}
                                 </div>
                               ))}
                             </div>
@@ -438,14 +438,14 @@ export function ImageDetailPage() {
                         </div>
                       </div>
 
-                      <div className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
-                        <h3 className="font-display text-xl text-ink-900 dark:text-white">Standards checklist</h3>
+                      <div className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
+                        <h3 className="font-display text-lg text-ink-900 dark:text-white">Standards checklist</h3>
                         <div className="mt-4 grid gap-4 2xl:grid-cols-3">
                           {complianceQuery.data.standards.map((standard) => (
-                            <article key={standard.name} className="rounded-2xl border border-ink-200 p-4 dark:border-ink-800">
+                            <article key={standard.name} className="rounded-lg border border-ink-200 p-4 dark:border-ink-800">
                               <div className="flex items-center justify-between gap-3">
                                 <h4 className="font-medium text-ink-900 dark:text-white">{standard.name}</h4>
-                                <span className={clsx("rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.18em]", complianceTone(standard.status))}>
+                                <span className={clsx("rounded-md px-2.5 py-1 text-xs font-medium uppercase tracking-wide", complianceTone(standard.status))}>
                                   {standard.status}
                                 </span>
                               </div>
@@ -454,7 +454,7 @@ export function ImageDetailPage() {
                                 {standard.checks.map((check) => (
                                   <div key={check.id}>
                                     <div className="flex items-center gap-2">
-                                      <span className={clsx("rounded-full px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.16em]", complianceTone(check.status))}>
+                                      <span className={clsx("rounded-md px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide", complianceTone(check.status))}>
                                         {check.status}
                                       </span>
                                       <p className="text-sm font-medium text-ink-900 dark:text-white">{check.title}</p>
@@ -467,7 +467,7 @@ export function ImageDetailPage() {
                           ))}
                         </div>
                         {complianceQuery.data.evidence_errors?.length ? (
-                          <div className="mt-4 rounded-2xl border border-rose/30 bg-rose/8 p-4 text-sm text-rose dark:text-rose/90">
+                          <div className="mt-4 rounded-md border border-rose/30 bg-rose/10 p-4 text-sm text-rose">
                             {complianceQuery.data.evidence_errors.join(" ")}
                           </div>
                         ) : null}
@@ -475,15 +475,15 @@ export function ImageDetailPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                  <h2 className="font-display text-2xl text-ink-900 dark:text-white">Exports</h2>
+                <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                  <h2 className="font-display text-xl text-ink-900 dark:text-white">Exports</h2>
                   <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">Download SBOMs and vulnerability reports in formats suited for archives, spreadsheets, and security tooling.</p>
                   <div className="mt-5 grid gap-3 md:grid-cols-2 2xl:grid-cols-5">
                     {imageExportOptions.map((item) => (
                       <a
                         key={item.format}
                         href={getImageExportURL(overview.org_id, overview.image_id, item.format)}
-                        className="rounded-[1.5rem] border border-ink-200 bg-white/80 px-4 py-4 text-sm transition hover:border-sky-400 hover:text-sky-700 dark:border-ink-800 dark:bg-ink-950/50 dark:hover:border-sky-600 dark:hover:text-sky-300"
+                        className="rounded-lg border border-ink-200 bg-ink-50 px-4 py-3 text-sm transition hover:border-tide hover:text-tide dark:border-ink-800 dark:bg-ink-950 dark:hover:border-sky-600 dark:hover:text-sky-300"
                       >
                         <span className="block font-medium text-ink-900 dark:text-white">{item.label}</span>
                         <span className="mt-1 block text-xs text-ink-500 dark:text-ink-400">{item.description}</span>
@@ -491,8 +491,8 @@ export function ImageDetailPage() {
                     ))}
                   </div>
                 </div>
-                <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                  <h2 className="font-display text-2xl text-ink-900 dark:text-white">Artifacts</h2>
+                <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                  <h2 className="font-display text-xl text-ink-900 dark:text-white">Artifacts</h2>
                   <div className="mt-4 overflow-x-auto">
                     <table className="min-w-[760px] text-left text-sm">
                       <thead className="text-ink-500 dark:text-ink-400">
@@ -544,10 +544,10 @@ export function ImageDetailPage() {
             ) : null}
 
             {tab === "Tags" ? (
-              <section className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
+              <section className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <h2 className="font-display text-2xl text-ink-900 dark:text-white">Repository tags</h2>
+                    <h2 className="font-display text-xl text-ink-900 dark:text-white">Repository tags</h2>
                     <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
                       Browse stored versions and best-effort public registry tags for this repository. Stored tags open directly, and public tags can be queued for scanning.
                     </p>
@@ -562,7 +562,7 @@ export function ImageDetailPage() {
                         setTagPage(1);
                       }}
                       placeholder="Filter tags or digests"
-                      className="w-full rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 dark:border-ink-700 dark:bg-ink-950/60 dark:text-white"
+                      className="w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 dark:border-ink-700 dark:bg-ink-900 dark:text-white"
                     />
                   </label>
                 </div>
@@ -570,12 +570,12 @@ export function ImageDetailPage() {
                   Otter already has {storedTagCount} stored tag{storedTagCount === 1 ? "" : "s"} for this repository. This view adds public registry tags when they can be listed.
                 </p>
                 {tagsQuery.data?.remote_tag_error ? (
-                  <div className="mt-5 rounded-2xl border border-amber-300/40 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                  <div className="mt-5 rounded-md border border-amber-300/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/20 dark:bg-amber-950/30 dark:text-amber-100">
                     {tagsQuery.data.remote_tag_error}
                   </div>
                 ) : null}
                 {tagsQuery.isLoading ? (
-                  <p className="mt-6 text-sm text-ink-500 dark:text-ink-400">Loading repository tags…</p>
+                  <p className="mt-6 text-sm text-ink-500 dark:text-ink-400">Loading repository tags...</p>
                 ) : tagsQuery.isError ? (
                   <EmptyState
                     title="Repository tags unavailable"
@@ -604,7 +604,7 @@ export function ImageDetailPage() {
                                 <td className="py-4 pr-6 align-top">
                                   <div className="font-medium text-ink-900 dark:text-white">{tagLabel}</div>
                                   {tagItem.current ? (
-                                    <span className="mt-2 inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-[11px] uppercase tracking-[0.16em] text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                                    <span className="mt-1 inline-flex rounded-md bg-sky-100 px-2 py-0.5 text-[11px] uppercase tracking-wide text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
                                       current
                                     </span>
                                   ) : null}
@@ -612,7 +612,7 @@ export function ImageDetailPage() {
                                 <td className="py-4 pr-6 align-top">
                                   <span
                                     className={clsx(
-                                      "inline-flex rounded-full px-2.5 py-1 text-[11px] uppercase tracking-[0.16em]",
+                                      "inline-flex rounded-md px-2 py-0.5 text-[11px] uppercase tracking-wide",
                                       tagItem.scanned
                                         ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
                                         : "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200"
@@ -646,7 +646,7 @@ export function ImageDetailPage() {
                                       type="button"
                                       onClick={() => tagScanMutation.mutate(imageName)}
                                       disabled={tagScanMutation.isPending || queuedTags[imageName]}
-                                      className="rounded-full border border-ink-200 px-3 py-1.5 text-xs uppercase tracking-[0.16em] text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                                      className="rounded-md border border-ink-200 px-2.5 py-1 text-xs uppercase tracking-wide text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
                                     >
                                       {queuedTags[imageName] ? "queued" : "scan"}
                                     </button>
@@ -676,7 +676,7 @@ export function ImageDetailPage() {
                           type="button"
                           onClick={() => setTagPage((current) => Math.max(1, current - 1))}
                           disabled={tagPage === 1}
-                          className="rounded-full border border-ink-200 px-4 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                          className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
                         >
                           Previous
                         </button>
@@ -687,7 +687,7 @@ export function ImageDetailPage() {
                           type="button"
                           onClick={() => setTagPage((current) => Math.min(totalTagPages, current + 1))}
                           disabled={tagPage >= totalTagPages}
-                          className="rounded-full border border-ink-200 px-4 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                          className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
                         >
                           Next
                         </button>
@@ -700,8 +700,8 @@ export function ImageDetailPage() {
 
             {tab === "Comparison" ? (
               <section className="grid gap-6">
-                <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                  <h2 className="font-display text-2xl text-ink-900 dark:text-white">Compare this image</h2>
+                <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                  <h2 className="font-display text-xl text-ink-900 dark:text-white">Compare this image</h2>
                   <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">Otter prefers stored scans from the same repository so you can compare the current tag against the closest previous version.</p>
                   {comparisonCandidates.length ? (
                     <div className="mt-4 flex flex-col gap-3 lg:flex-row">
@@ -709,7 +709,7 @@ export function ImageDetailPage() {
                         aria-label="Comparison target"
                         value={comparisonTargetId}
                         onChange={(event) => setComparisonTargetId(event.target.value)}
-                        className="flex-1 rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 dark:border-ink-700 dark:bg-ink-950/60 dark:text-white"
+                        className="flex-1 rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 dark:border-ink-700 dark:bg-ink-900 dark:text-white"
                       >
                         <option value="">Select a comparison target</option>
                         {comparisonCandidates.map((candidate) => (
@@ -727,19 +727,19 @@ export function ImageDetailPage() {
                             comparisonMutation.mutate(target);
                           }
                         }}
-                        className="rounded-2xl bg-ink-900 px-5 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-ink-900"
+                        className="rounded-md bg-ink-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-ink-900"
                       >
                         Run comparison
                       </button>
                     </div>
                   ) : (
-                    <div className="mt-4 rounded-2xl border border-ink-200 bg-white/80 p-4 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-950/50 dark:text-ink-300">
+                    <div className="mt-4 rounded-lg border border-ink-200 bg-ink-50 p-4 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-950 dark:text-ink-300">
                       No comparison candidates are stored for this repository yet. Scan another tag from the same repo first, then come back here.
                     </div>
                   )}
                 </div>
 
-                {comparisonMutation.isPending ? <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">Building comparison…</div> : null}
+                {comparisonMutation.isPending ? <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">Building comparison...</div> : null}
                 {comparisonMutation.isError ? (
                   <EmptyState
                     title="Comparison failed"
@@ -748,8 +748,8 @@ export function ImageDetailPage() {
                 ) : null}
                 {comparisonMutation.data ? (
                   <div className="grid gap-6">
-                    <section className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                      <h3 className="font-display text-2xl text-ink-900 dark:text-white">Summary</h3>
+                    <section className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                      <h3 className="font-display text-xl text-ink-900 dark:text-white">Summary</h3>
                       <p className="mt-3 text-base text-ink-700 dark:text-ink-200">{comparisonMutation.data.comparison.summary.message}</p>
                       <div className="mt-5 grid gap-3 md:grid-cols-3">
                         <StatCard label="Package delta" value={comparisonMutation.data.comparison.summary.package_delta} />
@@ -759,7 +759,7 @@ export function ImageDetailPage() {
                       <div className="mt-5">
                         <a
                           href={getComparisonExportURL(comparisonMutation.data.comparison_id)}
-                          className="inline-flex rounded-full bg-ink-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-ink-900"
+                          className="inline-flex rounded-md bg-ink-900 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-ink-900"
                         >
                           Download comparison JSON
                         </a>
@@ -776,10 +776,10 @@ export function ImageDetailPage() {
             ) : null}
 
             {tab === "Vulnerabilities" ? (
-              <section className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
+              <section className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
                 <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
                   <div>
-                    <h2 className="font-display text-2xl text-ink-900 dark:text-white">Vulnerabilities</h2>
+                    <h2 className="font-display text-xl text-ink-900 dark:text-white">Vulnerabilities</h2>
                     <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">Filter the merged Grype and Trivy findings by severity, advisory state, or package name.</p>
                   </div>
                   <div className="flex w-full flex-col gap-3 xl:w-auto xl:flex-row xl:flex-wrap xl:items-end xl:justify-end">
@@ -788,13 +788,13 @@ export function ImageDetailPage() {
                       value={searchFilter}
                       onChange={(event) => setSearchFilter(event.target.value)}
                       placeholder="Search CVE or package"
-                      className="w-full min-w-0 rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 xl:w-[min(22rem,40vw)] dark:border-ink-700 dark:bg-ink-950/60 dark:text-white"
+                      className="w-full min-w-0 rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 xl:w-[min(22rem,40vw)] dark:border-ink-700 dark:bg-ink-900 dark:text-white"
                     />
                     <select
                       aria-label="Filter vulnerability severity"
                       value={severityFilter}
                       onChange={(event) => setSeverityFilter(event.target.value as "" | Severity)}
-                      className="w-full min-w-0 rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 sm:w-auto sm:min-w-[190px] dark:border-ink-700 dark:bg-ink-950/60 dark:text-white"
+                      className="w-full min-w-0 rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 sm:w-auto sm:min-w-[190px] dark:border-ink-700 dark:bg-ink-900 dark:text-white"
                     >
                       {severityFilterOptions.map((option) => (
                         <option key={option || "all"} value={option}>
@@ -806,7 +806,7 @@ export function ImageDetailPage() {
                       aria-label="Filter vulnerability status"
                       value={statusFilter}
                       onChange={(event) => setStatusFilter(event.target.value)}
-                      className="w-full min-w-0 rounded-2xl border border-ink-200 bg-white/80 px-4 py-3 text-sm text-ink-900 sm:w-auto sm:min-w-[190px] dark:border-ink-700 dark:bg-ink-950/60 dark:text-white"
+                      className="w-full min-w-0 rounded-md border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 sm:w-auto sm:min-w-[190px] dark:border-ink-700 dark:bg-ink-900 dark:text-white"
                     >
                       {statusFilterOptions.map((option) => (
                         <option key={option || "all"} value={option}>
@@ -821,7 +821,7 @@ export function ImageDetailPage() {
                         setSeverityFilter("");
                         setStatusFilter("");
                       }}
-                      className="w-full rounded-2xl border border-ink-200 px-4 py-3 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 sm:w-auto sm:min-w-[160px] dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                      className="w-full rounded-md border border-ink-200 px-3 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 sm:w-auto sm:min-w-[160px] dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
                     >
                       Reset filters
                     </button>
@@ -831,7 +831,7 @@ export function ImageDetailPage() {
                 {scannerWarnings.length ? (
                   <div className="mt-5 space-y-3">
                     {scannerWarnings.map((warning) => (
-                      <div key={warning.scanner} className="rounded-2xl border border-amber-300/40 bg-amber-50/80 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                      <div key={warning.scanner} className="rounded-md border border-amber-300/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/20 dark:bg-amber-950/30 dark:text-amber-100">
                         <span className="font-medium">{warning.scanner} unavailable.</span> {warning.message}
                       </div>
                     ))}
@@ -839,7 +839,7 @@ export function ImageDetailPage() {
                 ) : null}
 
                 {vulnerabilitiesQuery.isLoading ? (
-                  <p className="mt-6 text-sm text-ink-500 dark:text-ink-400">Loading vulnerabilities…</p>
+                  <p className="mt-6 text-sm text-ink-500 dark:text-ink-400">Loading vulnerabilities...</p>
                 ) : vulnerabilitiesQuery.isError ? (
                   <EmptyState
                     title="Vulnerabilities unavailable"
@@ -861,8 +861,8 @@ export function ImageDetailPage() {
                         <tbody className="divide-y divide-ink-200 dark:divide-ink-800">
                           {filteredVulnerabilities.map((vulnerability) => (
                             <tr key={`${vulnerability.id}-${vulnerability.package_name}-${vulnerability.package_version}`}>
-                              <td className="py-5 pr-6 align-top"><SeverityPill severity={vulnerability.severity} /></td>
-                              <td className="py-5 pr-6 align-top">
+                              <td className="py-4 pr-6 align-top"><SeverityPill severity={vulnerability.severity} /></td>
+                              <td className="py-4 pr-6 align-top">
                                 <div className="font-medium text-ink-900 dark:text-white">
                                   <button
                                     type="button"
@@ -872,24 +872,24 @@ export function ImageDetailPage() {
                                     {vulnerability.id}
                                   </button>
                                 </div>
-                                <div className="mt-2 max-w-2xl text-sm leading-6 text-ink-500 dark:text-ink-400">{vulnerability.title || vulnerability.description}</div>
+                                <div className="mt-1 max-w-2xl text-sm leading-6 text-ink-500 dark:text-ink-400">{vulnerability.title || vulnerability.description}</div>
                                 {vulnerabilityLink(vulnerability) ? (
                                   <a
                                     href={vulnerabilityLink(vulnerability)}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="mt-3 inline-flex text-xs uppercase tracking-[0.16em] text-tide hover:text-sky-600 dark:hover:text-sky-300"
+                                    className="mt-2 inline-flex text-xs uppercase tracking-wide text-tide hover:text-sky-600 dark:hover:text-sky-300"
                                   >
                                     Open external reference
                                   </a>
                                 ) : null}
                               </td>
-                              <td className="py-5 pr-6 align-top text-ink-600 dark:text-ink-300">
+                              <td className="py-4 pr-6 align-top text-ink-600 dark:text-ink-300">
                                 <div className="font-medium text-ink-900 dark:text-white">{vulnerability.package_name}</div>
                                 <div className="mt-1">{vulnerability.package_version || "Unknown version"}</div>
                               </td>
-                              <td className="py-5 pr-6 align-top text-ink-600 dark:text-ink-300">{vulnerability.fix_version || "Unavailable"}</td>
-                              <td className="py-5 align-top text-ink-600 dark:text-ink-300">{vulnerability.status}</td>
+                              <td className="py-4 pr-6 align-top text-ink-600 dark:text-ink-300">{vulnerability.fix_version || "Unavailable"}</td>
+                              <td className="py-4 align-top text-ink-600 dark:text-ink-300">{vulnerability.status}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -912,8 +912,8 @@ export function ImageDetailPage() {
 
             {tab === "SBOM" ? (
               <section className="grid gap-6">
-                <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                  <h2 className="font-display text-2xl text-ink-900 dark:text-white">SBOM package inventory</h2>
+                <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                  <h2 className="font-display text-xl text-ink-900 dark:text-white">SBOM package inventory</h2>
                   <div className="mt-5 grid gap-3 md:grid-cols-3">
                     <StatCard label="Packages" value={sbomQuery.data?.package_count ?? 0} />
                     <StatCard label="Dependency roots" value={sbomQuery.data?.dependency_roots.length ?? 0} />
@@ -921,15 +921,15 @@ export function ImageDetailPage() {
                   </div>
                   <div className="mt-5 flex flex-wrap gap-2">
                     {sbomQuery.data?.license_summary.map((license) => (
-                      <span key={license.license} className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">
+                      <span key={license.license} className="rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">
                         {license.license} · {license.count}
                       </span>
                     ))}
                   </div>
                 </div>
                 <div className="grid gap-6 3xl:grid-cols-[1.15fr_0.85fr]">
-                  <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                    <h3 className="font-display text-xl text-ink-900 dark:text-white">Packages</h3>
+                  <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                    <h3 className="font-display text-lg text-ink-900 dark:text-white">Packages</h3>
                     <div className="mt-4 max-h-[720px] overflow-auto">
                       <table className="min-w-[780px] text-left text-sm">
                         <thead className="text-ink-500 dark:text-ink-400">
@@ -960,8 +960,8 @@ export function ImageDetailPage() {
                       </table>
                     </div>
                   </div>
-                  <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                    <h3 className="font-display text-xl text-ink-900 dark:text-white">Dependency tree</h3>
+                  <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                    <h3 className="font-display text-lg text-ink-900 dark:text-white">Dependency tree</h3>
                     <div className="mt-4 max-h-[720px] overflow-auto">
                       <div className="min-w-[320px] space-y-3">
                         {dependencyTree
@@ -979,8 +979,8 @@ export function ImageDetailPage() {
 
             {tab === "Attestations" ? (
               <section className="grid gap-6">
-                <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                  <h2 className="font-display text-2xl text-ink-900 dark:text-white">Attestation coverage</h2>
+                <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                  <h2 className="font-display text-xl text-ink-900 dark:text-white">Attestation coverage</h2>
                   <div className="mt-5 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
                     <StatCard label="Records" value={attestationsQuery.data?.summary.total ?? 0} />
                     <StatCard label="Signatures" value={attestationsQuery.data?.summary.signatures ?? 0} />
@@ -996,21 +996,21 @@ export function ImageDetailPage() {
                 ) : (
                   <>
                     {!attestationsQuery.data?.summary.total ? (
-                      <div className="rounded-[2rem] border border-ink-200 bg-white/80 p-5 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-950/50 dark:text-ink-300">
+                      <div className="rounded-lg border border-ink-200 bg-ink-50 p-5 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-950 dark:text-ink-300">
                         No signatures or attestations were discovered for this image. That usually means the scanned image does not publish OCI referrers or cosign metadata, not that the viewer is broken.
                       </div>
                     ) : null}
                     <div className="grid gap-4 2xl:grid-cols-2">
                       {[...(attestationsQuery.data?.signatures ?? []), ...(attestationsQuery.data?.attestations ?? [])].map((record) => (
-                        <article key={`${record.kind}-${record.digest}`} className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
+                        <article key={`${record.kind}-${record.digest}`} className="rounded-xl border border-ink-200 bg-white p-5 dark:border-ink-800 dark:bg-ink-900">
                           <div className="flex items-start justify-between gap-4">
                             <div className="min-w-0">
-                              <p className="text-sm uppercase tracking-[0.22em] text-ink-500 dark:text-ink-400">{record.kind}</p>
-                              <h3 className="mt-2 truncate font-display text-xl text-ink-900 dark:text-white" title={record.signer || record.predicate_type || record.source}>
+                              <p className="text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400">{record.kind}</p>
+                              <h3 className="mt-1 truncate font-display text-lg text-ink-900 dark:text-white" title={record.signer || record.predicate_type || record.source}>
                                 {record.signer || record.predicate_type || record.source}
                               </h3>
                             </div>
-                            <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">{record.verification_status}</span>
+                            <span className="rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">{record.verification_status}</span>
                           </div>
                           <dl className="mt-4 grid gap-3 text-sm text-ink-600 dark:text-ink-300">
                             <div><dt className="font-medium text-ink-900 dark:text-white">Digest</dt><dd className="break-all">{record.digest}</dd></div>
@@ -1027,8 +1027,8 @@ export function ImageDetailPage() {
 
             {tab === "Advisories" ? (
               <section className="grid gap-6">
-                <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                  <h2 className="font-display text-2xl text-ink-900 dark:text-white">Advisories and VEX status</h2>
+                <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                  <h2 className="font-display text-xl text-ink-900 dark:text-white">Advisories and VEX status</h2>
                   <div className="mt-5 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
                     <StatCard label="Affected" value={vulnerabilitiesQuery.data?.summary.by_status?.affected ?? 0} />
                     <StatCard label="Not affected" value={vulnerabilitiesQuery.data?.summary.by_status?.not_affected ?? 0} />
@@ -1037,11 +1037,11 @@ export function ImageDetailPage() {
                   </div>
                 </div>
                 <div className="grid gap-6 2xl:grid-cols-[1.1fr_0.9fr]">
-                  <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                    <h3 className="font-display text-xl text-ink-900 dark:text-white">Advisory-backed vulnerabilities</h3>
-                    <div className="mt-4 space-y-4">
+                  <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                    <h3 className="font-display text-lg text-ink-900 dark:text-white">Advisory-backed vulnerabilities</h3>
+                    <div className="mt-4 space-y-3">
                       {filteredAdvisories(vulnerabilityRecords).map((vulnerability) => (
-                        <article key={`${vulnerability.id}-${vulnerability.package_name}`} className="rounded-2xl border border-ink-200 p-4 dark:border-ink-800">
+                        <article key={`${vulnerability.id}-${vulnerability.package_name}`} className="rounded-lg border border-ink-200 p-4 dark:border-ink-800">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
                               <p className="font-medium text-ink-900 dark:text-white">{vulnerability.id}</p>
@@ -1049,7 +1049,7 @@ export function ImageDetailPage() {
                             </div>
                             <div className="flex items-center gap-2">
                               <SeverityPill severity={vulnerability.severity} />
-                              <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">{vulnerability.status}</span>
+                              <span className="rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-200">{vulnerability.status}</span>
                             </div>
                           </div>
                           {vulnerability.advisory?.status_notes ? (
@@ -1062,11 +1062,11 @@ export function ImageDetailPage() {
                       ) : null}
                     </div>
                   </div>
-                  <div className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-                    <h3 className="font-display text-xl text-ink-900 dark:text-white">VEX documents</h3>
+                  <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+                    <h3 className="font-display text-lg text-ink-900 dark:text-white">VEX documents</h3>
                     <div className="mt-4 space-y-3">
                       {(vulnerabilitiesQuery.data?.vex_documents ?? []).map((document) => (
-                        <div key={document.document_id} className="rounded-2xl border border-ink-200 p-4 dark:border-ink-800">
+                        <div key={document.document_id} className="rounded-lg border border-ink-200 p-4 dark:border-ink-800">
                           <p className="font-medium text-ink-900 dark:text-white">{document.filename || document.document_id}</p>
                           <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">{document.author || "Unknown author"} · version {document.version}</p>
                         </div>
@@ -1084,7 +1084,7 @@ export function ImageDetailPage() {
       </div>
 
       {selectedVulnerability ? (
-        <div className="fixed inset-0 z-40 bg-ink-950/55 backdrop-blur-sm">
+        <div className="fixed inset-0 z-40 bg-ink-950/60">
           <button
             type="button"
             aria-label="Close vulnerability details"
@@ -1095,17 +1095,17 @@ export function ImageDetailPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="vulnerability-detail-title"
-            className="absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col overflow-hidden border-l border-white/10 bg-white shadow-haze dark:bg-ink-900 lg:w-[46vw]"
+            className="absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col overflow-hidden border-l border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-900 lg:w-[46vw]"
           >
             <div className="flex items-start justify-between gap-4 border-b border-ink-200 px-6 py-5 dark:border-ink-800">
               <div className="min-w-0">
-                <p className="text-xs uppercase tracking-[0.2em] text-ink-500 dark:text-ink-400">Vulnerability details</p>
-                <h2 id="vulnerability-detail-title" className="mt-2 break-all font-display text-2xl text-ink-900 dark:text-white">
+                <p className="text-xs uppercase tracking-wider text-ink-500 dark:text-ink-400">Vulnerability details</p>
+                <h2 id="vulnerability-detail-title" className="mt-2 break-all font-display text-xl text-ink-900 dark:text-white">
                   {selectedVulnerability.id}
                 </h2>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <SeverityPill severity={selectedVulnerability.severity} />
-                  <span className="rounded-full bg-ink-100 px-3 py-1 text-xs font-medium uppercase tracking-[0.16em] text-ink-700 dark:bg-ink-800 dark:text-ink-200">
+                  <span className="rounded-md bg-ink-100 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-ink-700 dark:bg-ink-800 dark:text-ink-200">
                     {selectedVulnerability.status}
                   </span>
                 </div>
@@ -1113,7 +1113,7 @@ export function ImageDetailPage() {
               <button
                 type="button"
                 onClick={() => setSelectedVulnerability(null)}
-                className="rounded-full border border-ink-200 px-4 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
               >
                 Close
               </button>
@@ -1121,8 +1121,8 @@ export function ImageDetailPage() {
 
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <div className="space-y-6">
-                <section className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
-                  <h3 className="font-display text-xl text-ink-900 dark:text-white">Summary</h3>
+                <section className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
+                  <h3 className="font-display text-lg text-ink-900 dark:text-white">Summary</h3>
                   <p className="mt-3 text-sm leading-7 text-ink-700 dark:text-ink-200">
                     {selectedVulnerability.title || selectedVulnerability.description || "No description was returned for this vulnerability."}
                   </p>
@@ -1131,14 +1131,14 @@ export function ImageDetailPage() {
                       href={vulnerabilityLink(selectedVulnerability)}
                       target="_blank"
                       rel="noreferrer"
-                      className="mt-4 inline-flex rounded-full border border-ink-200 px-4 py-2 text-sm text-tide transition hover:border-sky-500 hover:text-sky-600 dark:border-ink-700 dark:hover:border-sky-500 dark:hover:text-sky-300"
+                      className="mt-4 inline-flex rounded-md border border-ink-200 px-3 py-1.5 text-sm text-tide transition hover:border-tide dark:border-ink-700 dark:hover:border-sky-500 dark:hover:text-sky-300"
                     >
                       Open primary reference
                     </a>
                   ) : null}
                 </section>
 
-                <section className="grid gap-4 lg:grid-cols-2">
+                <section className="grid gap-3 lg:grid-cols-2">
                   <DetailCard label="Package" value={selectedVulnerability.package_name} />
                   <DetailCard label="Package version" value={selectedVulnerability.package_version || "Unknown"} />
                   <DetailCard label="Package type" value={selectedVulnerability.package_type || "Unknown"} />
@@ -1149,16 +1149,16 @@ export function ImageDetailPage() {
                   <DetailCard label="Last seen" value={formatTimestamp(selectedVulnerability.last_seen_at)} />
                 </section>
 
-                <section className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
-                  <h3 className="font-display text-xl text-ink-900 dark:text-white">Scanners and fixes</h3>
+                <section className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
+                  <h3 className="font-display text-lg text-ink-900 dark:text-white">Scanners and fixes</h3>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {selectedVulnerability.scanners.map((scanner) => (
-                      <span key={scanner} className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium uppercase tracking-[0.16em] text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                      <span key={scanner} className="rounded-md bg-sky-100 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
                         {scanner}
                       </span>
                     ))}
                     {selectedVulnerability.fix_versions?.map((version) => (
-                      <span key={version} className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      <span key={version} className="rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
                         fix {version}
                       </span>
                     ))}
@@ -1166,14 +1166,14 @@ export function ImageDetailPage() {
                 </section>
 
                 {selectedVulnerability.cvss?.length ? (
-                  <section className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
-                    <h3 className="font-display text-xl text-ink-900 dark:text-white">CVSS</h3>
-                    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <section className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
+                    <h3 className="font-display text-lg text-ink-900 dark:text-white">CVSS</h3>
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
                       {selectedVulnerability.cvss.map((entry) => (
-                        <article key={`${entry.source || "unknown"}-${entry.vector || entry.score || "cvss"}`} className="rounded-2xl border border-ink-200 p-4 dark:border-ink-800">
+                        <article key={`${entry.source || "unknown"}-${entry.vector || entry.score || "cvss"}`} className="rounded-lg border border-ink-200 p-3 dark:border-ink-800">
                           <p className="text-sm font-medium text-ink-900 dark:text-white">{entry.source || "Unknown source"}</p>
-                          <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">Score: {entry.score ?? "n/a"}</p>
-                          {entry.vector ? <p className="mt-2 break-all text-xs text-ink-500 dark:text-ink-400">{entry.vector}</p> : null}
+                          <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">Score: {entry.score ?? "n/a"}</p>
+                          {entry.vector ? <p className="mt-1 break-all text-xs text-ink-500 dark:text-ink-400">{entry.vector}</p> : null}
                         </article>
                       ))}
                     </div>
@@ -1181,16 +1181,16 @@ export function ImageDetailPage() {
                 ) : null}
 
                 {selectedVulnerability.references?.length ? (
-                  <section className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
-                    <h3 className="font-display text-xl text-ink-900 dark:text-white">References</h3>
-                    <div className="mt-4 space-y-3">
+                  <section className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
+                    <h3 className="font-display text-lg text-ink-900 dark:text-white">References</h3>
+                    <div className="mt-4 space-y-2">
                       {selectedVulnerability.references.map((reference) => (
                         <a
                           key={reference}
                           href={reference}
                           target="_blank"
                           rel="noreferrer"
-                          className="block break-all rounded-2xl border border-ink-200 px-4 py-3 text-sm text-tide transition hover:border-sky-500 hover:text-sky-600 dark:border-ink-800 dark:hover:border-sky-500 dark:hover:text-sky-300"
+                          className="block break-all rounded-lg border border-ink-200 px-3 py-2 text-sm text-tide transition hover:border-tide dark:border-ink-800 dark:hover:border-sky-500 dark:hover:text-sky-300"
                         >
                           {reference}
                         </a>
@@ -1200,8 +1200,8 @@ export function ImageDetailPage() {
                 ) : null}
 
                 {selectedVulnerability.advisory ? (
-                  <section className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-5 dark:border-ink-800 dark:bg-ink-950/50">
-                    <h3 className="font-display text-xl text-ink-900 dark:text-white">Advisory / VEX overlay</h3>
+                  <section className="rounded-lg border border-ink-200 bg-ink-50 p-5 dark:border-ink-800 dark:bg-ink-950">
+                    <h3 className="font-display text-lg text-ink-900 dark:text-white">Advisory / VEX overlay</h3>
                     <dl className="mt-4 grid gap-3 text-sm text-ink-600 dark:text-ink-300">
                       <div><dt className="font-medium text-ink-900 dark:text-white">Document</dt><dd>{selectedVulnerability.advisory.filename || selectedVulnerability.advisory.document_id}</dd></div>
                       <div><dt className="font-medium text-ink-900 dark:text-white">Author</dt><dd>{selectedVulnerability.advisory.author || "Unknown"}</dd></div>
@@ -1219,17 +1219,17 @@ export function ImageDetailPage() {
       ) : null}
 
       {selectedArtifact ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/70 p-4 backdrop-blur-sm">
-          <div className="flex h-[min(90vh,980px)] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-white shadow-haze dark:bg-ink-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/70 p-4">
+          <div className="flex h-[min(90vh,980px)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-900">
             <div className="flex items-center justify-between gap-4 border-b border-ink-200 px-5 py-4 dark:border-ink-800">
               <div>
-                <h2 className="font-display text-2xl text-ink-900 dark:text-white">Artifact viewer</h2>
+                <h2 className="font-display text-xl text-ink-900 dark:text-white">Artifact viewer</h2>
                 <p className="text-sm text-ink-500 dark:text-ink-400">{selectedArtifact}</p>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedArtifact(null)}
-                className="rounded-full border border-ink-200 px-4 py-2 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
               >
                 Close
               </button>
@@ -1237,8 +1237,8 @@ export function ImageDetailPage() {
 
             <div className="min-h-0 flex-1 p-5">
               {artifactQuery.isLoading ? (
-                <div className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-6 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-950/50 dark:text-ink-300">
-                  Loading artifact JSON…
+                <div className="rounded-lg border border-ink-200 bg-ink-50 p-6 text-sm text-ink-600 dark:border-ink-800 dark:bg-ink-950 dark:text-ink-300">
+                  Loading artifact JSON...
                 </div>
               ) : artifactQuery.isError ? (
                 <EmptyState
@@ -1267,7 +1267,7 @@ function DependencyTreeCard({
 }) {
   if (depth > 2) {
     return (
-      <div className="rounded-2xl border border-dashed border-sky-200 bg-sky-50/50 px-4 py-3 text-sm text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-sky-200">
+      <div className="rounded-lg border border-dashed border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/20 dark:text-sky-200">
         Additional nested dependencies are hidden on smaller layouts.
       </div>
     );
@@ -1276,7 +1276,7 @@ function DependencyTreeCard({
   return (
     <div
       className={clsx(
-        "rounded-2xl border p-4 shadow-sm",
+        "rounded-lg border p-4",
         dependencyTone(depth),
         depth > 0 ? "border-l-4 pl-3" : ""
       )}
@@ -1313,9 +1313,9 @@ function filteredAdvisories(vulnerabilities: VulnerabilityRecord[]) {
 
 function DetailCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-4 dark:border-ink-800 dark:bg-ink-950/50">
-      <p className="text-xs uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">{label}</p>
-      <p className="mt-2 break-all text-sm font-medium text-ink-900 dark:text-white">{value}</p>
+    <div className="rounded-lg border border-ink-200 bg-ink-50 p-4 dark:border-ink-800 dark:bg-ink-950">
+      <p className="text-xs font-medium uppercase tracking-wide text-ink-500 dark:text-ink-400">{label}</p>
+      <p className="mt-1.5 break-all text-sm font-medium text-ink-900 dark:text-white">{value}</p>
     </div>
   );
 }
@@ -1339,11 +1339,11 @@ function vulnerabilityLink(vulnerability: VulnerabilityRecord) {
 function dependencyTone(depth: number) {
   switch (depth) {
     case 0:
-      return "border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/10";
+      return "border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20";
     case 1:
-      return "border-sky-200 bg-sky-50/70 dark:border-sky-900/50 dark:bg-sky-950/15";
+      return "border-sky-200 bg-sky-50 dark:border-sky-900/50 dark:bg-sky-950/20";
     default:
-      return "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/15";
+      return "border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20";
   }
 }
 

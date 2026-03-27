@@ -74,11 +74,11 @@ const productFlow = [
 
 export function DocsPage() {
   return (
-    <div className="space-y-8">
-      <section className="rounded-[2.5rem] border border-white/60 bg-white/75 p-6 shadow-haze backdrop-blur dark:border-white/10 dark:bg-ink-900/80 sm:p-8">
-        <p className="text-xs uppercase tracking-[0.22em] text-ink-500 dark:text-ink-400">Otter docs</p>
-        <h1 className="mt-3 font-display text-4xl tracking-tight text-ink-900 dark:text-white">Architecture, runbook, and supported capabilities</h1>
-        <p className="mt-4 max-w-4xl text-base leading-8 text-ink-600 dark:text-ink-300">
+    <div className="space-y-6">
+      <section className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900 sm:p-8">
+        <p className="text-xs font-medium uppercase tracking-wider text-ink-500 dark:text-ink-400">Otter docs</p>
+        <h1 className="mt-3 font-display text-3xl tracking-tight text-ink-900 dark:text-white">Architecture, runbook, and supported capabilities</h1>
+        <p className="mt-4 max-w-4xl text-base leading-7 text-ink-600 dark:text-ink-300">
           This page explains the current system shape, how to run it locally, how the main scan flow works, and what the product
           supports today. The same information is also captured in the repository docs for contributors.
         </p>
@@ -86,8 +86,8 @@ export function DocsPage() {
 
       <section className="grid gap-4 xl:grid-cols-3">
         {architectureSections.map((section) => (
-          <article key={section.title} className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-            <h2 className="font-display text-2xl text-ink-900 dark:text-white">{section.title}</h2>
+          <article key={section.title} className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+            <h2 className="font-display text-xl text-ink-900 dark:text-white">{section.title}</h2>
             <ul className="mt-4 space-y-3 text-sm leading-7 text-ink-600 dark:text-ink-300">
               {section.items.map((item) => (
                 <li key={item}>{item}</li>
@@ -97,14 +97,14 @@ export function DocsPage() {
         ))}
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-        <article className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-          <h2 className="font-display text-2xl text-ink-900 dark:text-white">Run locally</h2>
+      <section className="grid gap-4 lg:grid-cols-2">
+        <article className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+          <h2 className="font-display text-xl text-ink-900 dark:text-white">Run locally</h2>
           <div className="mt-5 space-y-4">
             {runSteps.map((step) => (
-              <div key={step.title} className="rounded-[1.5rem] border border-ink-200 bg-white/80 p-4 dark:border-ink-800 dark:bg-ink-950/50">
+              <div key={step.title} className="rounded-lg border border-ink-200 bg-ink-50 p-4 dark:border-ink-800 dark:bg-ink-950">
                 <p className="text-sm font-medium text-ink-900 dark:text-white">{step.title}</p>
-                <pre className="mt-3 overflow-x-auto rounded-2xl bg-ink-950 px-4 py-3 text-sm text-ink-50">
+                <pre className="mt-3 overflow-x-auto rounded-lg bg-ink-950 px-4 py-3 text-sm text-ink-50">
                   <code>{step.code}</code>
                 </pre>
                 <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">{step.note}</p>
@@ -113,21 +113,21 @@ export function DocsPage() {
           </div>
         </article>
 
-        <article className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-          <h2 className="font-display text-2xl text-ink-900 dark:text-white">Primary flow</h2>
+        <article className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+          <h2 className="font-display text-xl text-ink-900 dark:text-white">Primary flow</h2>
           <div className="mt-5 space-y-3">
             {productFlow.map((step, index) => (
-              <div key={step} className="rounded-[1.5rem] border border-ink-200 bg-white/80 px-4 py-4 dark:border-ink-800 dark:bg-ink-950/50">
-                <p className="text-xs uppercase tracking-[0.18em] text-ink-500 dark:text-ink-400">Step {index + 1}</p>
-                <p className="mt-2 text-sm leading-7 text-ink-700 dark:text-ink-200">{step}</p>
+              <div key={step} className="rounded-lg border border-ink-200 bg-ink-50 px-4 py-3 dark:border-ink-800 dark:bg-ink-950">
+                <p className="text-xs font-medium uppercase tracking-wide text-ink-500 dark:text-ink-400">Step {index + 1}</p>
+                <p className="mt-1.5 text-sm leading-6 text-ink-700 dark:text-ink-200">{step}</p>
               </div>
             ))}
           </div>
         </article>
       </section>
 
-      <section className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-        <h2 className="font-display text-2xl text-ink-900 dark:text-white">Supported capabilities</h2>
+      <section className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+        <h2 className="font-display text-xl text-ink-900 dark:text-white">Supported capabilities</h2>
         <div className="mt-5 overflow-x-auto">
           <table className="min-w-[760px] text-left text-sm">
             <thead className="text-ink-500 dark:text-ink-400">
@@ -148,8 +148,8 @@ export function DocsPage() {
         </div>
       </section>
 
-      <section className="rounded-[2rem] border border-white/60 bg-white/75 p-6 shadow-haze dark:border-white/10 dark:bg-ink-900/80">
-        <h2 className="font-display text-2xl text-ink-900 dark:text-white">Tutorials and issue tracking</h2>
+      <section className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+        <h2 className="font-display text-xl text-ink-900 dark:text-white">Tutorials and issue tracking</h2>
         <div className="mt-5 overflow-x-auto">
           <table className="min-w-[760px] text-left text-sm">
             <thead className="text-ink-500 dark:text-ink-400">
