@@ -65,7 +65,7 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const message = await readErrorMessage(response);
     throw new Error(message || `Request failed with ${response.status}`);
   }
 

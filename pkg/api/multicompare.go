@@ -40,9 +40,6 @@ func (h *ScanHandler) MultiCompare(c *gin.Context) {
 			return
 		}
 		orgID := strings.TrimSpace(img.OrgID)
-		if orgID == "" {
-			orgID = "default"
-		}
 
 		target, err := h.resolveComparisonTarget(c.Request.Context(), img.Name, orgID, allowedOrgs)
 		if err != nil {
