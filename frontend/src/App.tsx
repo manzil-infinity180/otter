@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import { BrowserRouter, Link, NavLink, Outlet, Route, Routes } from "react-router-dom";
 
+import { ComparePage } from "./pages/compare-page";
 import { DocsPage } from "./pages/docs-page";
 import { DirectoryPage } from "./pages/directory-page";
 import { ImageDetailPage } from "./pages/image-detail-page";
@@ -65,6 +66,14 @@ function Layout() {
                 Directory
               </NavLink>
               <NavLink
+                to="/compare"
+                className={({ isActive }) =>
+                  `rounded-md px-3 py-1.5 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
+                }
+              >
+                Compare
+              </NavLink>
+              <NavLink
                 to="/docs"
                 className={({ isActive }) =>
                   `rounded-md px-3 py-1.5 ${isActive ? "bg-ink-900 text-white dark:bg-white dark:text-ink-900" : "text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"}`
@@ -103,6 +112,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<LandingPage />} />
+          <Route path="/compare" element={<ComparePage />} />
           <Route path="/directory" element={<DirectoryPage />} />
           <Route path="/docs" element={<DocsPage />} />
           <Route path="/images/:orgId/:imageId" element={<ImageDetailPage />} />

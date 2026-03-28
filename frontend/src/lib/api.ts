@@ -207,3 +207,95 @@ export function compareImages(params: {
 }) {
   return postJSON<ComparisonResponse>("/api/v1/comparisons", params);
 }
+
+// Multi-image comparison types
+export interface MultiCompareImage {
+  name: string;
+  org_id?: string;
+}
+
+export interface VulnSummary {
+  total: number;
+  by_severity: Record<string, number>;
+  fixable: number;
+  unfixable: number;
+}
+
+export interface MultiCompareImageSnapshot {
+  org_id: string;
+  image_id: string;
+  image_name: string;
+  package_count: number;
+  vulnerability_summary: VulnSummary;
+  license_summary?: Array<{ license: string; count: number }>;
+  compliance?: {
+    slsa_level?: string;
+    scorecard_score?: number;
+    has_sbom: boolean;
+    has_signature: boolean;
+    has_attestation: boolean;
+  };
+  trend?: Array<{ observed_at: string; total: number; critical: number; high: number }>;
+  scanners?: string[];
+  updated_at: string;
+  color: string;
+}
+
+export interface SeverityDataPoint {
+  severity: string;
+  counts: number[];
+}
+
+export interface PackageOverlapEntry {
+  name: string;
+  type?: string;
+  versions: string[];
+  in_images: number[];
+}
+
+export interface PairwiseDiff {
+  image1_index: number;
+  image2_index: number;
+  packages_added: number;
+  packages_removed: number;
+  packages_changed: number;
+  vulns_new: number;
+  vulns_fixed: number;
+  vulns_unchanged: number;
+}
+
+export interface MultiCompareReport {
+  id: string;
+  generated_at: string;
+  images: MultiCompareImageSnapshot[];
+  pairwise_diffs: PairwiseDiff[];
+  chart_data: {
+    severity_breakdown: SeverityDataPoint[];
+    package_overlap: PackageOverlapEntry[];
+  };
+  winner: number;
+}
+
+export interface MultiCompareResponse {
+  report: MultiCompareReport;
+  storage_backend: string;
+}
+
+export interface PresetComparison {
+  id: string;
+  name: string;
+  description: string;
+  images: MultiCompareImage[];
+}
+
+export interface PresetsResponse {
+  presets: PresetComparison[];
+}
+
+export function multiCompare(images: MultiCompareImage[]) {
+  return postJSON<MultiCompareResponse>("/api/v1/multi-compare", { images });
+}
+
+export function getMultiComparePresets() {
+  return request<PresetsResponse>("/api/v1/multi-compare/presets");
+}
