@@ -33,10 +33,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store, err := buildStore(ctx)
+	rawStore, err := buildStore(ctx)
 	if err != nil {
 		log.Fatalf("build storage backend: %v", err)
 	}
+	store := storage.NewIntegrityStore(rawStore)
 	defer func() {
 		if err := store.Close(); err != nil {
 			log.Printf("close storage backend: %v", err)

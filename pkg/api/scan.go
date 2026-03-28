@@ -729,8 +729,16 @@ func (h *ScanHandler) DownloadScanFile(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "scan file not found"})
 			return
 		}
+		if errors.Is(err, storage.ErrIntegrityMismatch) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "artifact integrity check failed"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("download scan file: %v", err)})
 		return
+	}
+
+	if checksum := object.Info.Metadata[storage.MetadataKeySHA256]; checksum != "" {
+		c.Header("Content-SHA256", checksum)
 	}
 
 	contentType := object.Info.ContentType
