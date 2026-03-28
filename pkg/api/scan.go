@@ -497,14 +497,14 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 		if strings.TrimSpace(report.Message) != "" {
 			metadata["message"] = report.Message
 		}
-			uploads = append(uploads, artifactUpload{
-				ResponseName: scannerResponseKey(report.Scanner),
-				Key:          key,
-				Data:         report.Document,
-				ContentType:  report.ContentType,
-				Metadata:     artifactMetadata(metadata),
-			})
-		}
+		uploads = append(uploads, artifactUpload{
+			ResponseName: scannerResponseKey(report.Scanner),
+			Key:          key,
+			Data:         report.Document,
+			ContentType:  report.ContentType,
+			Metadata:     artifactMetadata(metadata),
+		})
+	}
 
 	storedFiles := make(map[string]ObjectResponse, len(uploads))
 	storedKeys := make([]string, 0, len(uploads))
