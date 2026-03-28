@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import type { MultiCompareImageSnapshot, PackageOverlapEntry } from "../../lib/api";
 
 interface PackageComparisonProps {
@@ -53,7 +53,7 @@ export function PackageComparison({ images, packages }: PackageComparisonProps) 
               <Tooltip contentStyle={{ backgroundColor: "#18181b", border: "1px solid #3f3f46", borderRadius: "8px", color: "#fff", fontSize: "12px" }} />
               <Bar dataKey="packages" radius={[0, 4, 4, 0]} maxBarSize={32}>
                 {countData.map((entry, index) => (
-                  <Bar key={index} dataKey="packages" fill={entry.fill} />
+                  <Cell key={index} fill={entry.fill} />
                 ))}
               </Bar>
             </BarChart>

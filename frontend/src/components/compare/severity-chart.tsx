@@ -27,9 +27,18 @@ export function SeverityChart({ data, images }: SeverityChartProps) {
   }
 
   return (
-    <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
+    <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900" id="severity-chart">
       <h3 className="font-display text-lg text-ink-900 dark:text-white">CVEs by Severity</h3>
-      <div className="mt-4" id="severity-chart">
+      {/* Legend for export (always visible) */}
+      <div className="mt-3 flex flex-wrap gap-4">
+        {images.map((img) => (
+          <span key={img.image_name} className="flex items-center gap-1.5 text-xs text-ink-600 dark:text-ink-300">
+            <span className="inline-block h-3 w-3 rounded" style={{ backgroundColor: img.color }} />
+            {img.image_name}
+          </span>
+        ))}
+      </div>
+      <div className="mt-3">
         <ResponsiveContainer width="100%" height={320}>
           <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -44,7 +53,6 @@ export function SeverityChart({ data, images }: SeverityChartProps) {
                 fontSize: "12px",
               }}
             />
-            <Legend wrapperStyle={{ fontSize: "12px" }} />
             {images.map((img) => (
               <Bar
                 key={img.image_name}
