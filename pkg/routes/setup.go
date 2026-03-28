@@ -29,6 +29,7 @@ func SetupRoutes(router *gin.Engine, handlers *Handlers, authenticator *auth.Aut
 	}
 
 	router.Use(authenticator.Middleware())
+	router.Use(MaxBodySize())
 	setupScanRoutes(router, handlers, authenticator)
 	setupAWSRoutes(router, handlers, authenticator)
 	setupFrontendRoutes(router, handlers, authenticator)
