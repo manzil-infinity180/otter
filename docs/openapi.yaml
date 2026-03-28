@@ -1,0 +1,265 @@
+openapi: 3.1.0
+info:
+  title: Otter API
+  description: Multi-scanner vulnerability evidence aggregator for container images
+  version: 1.0.0
+  license:
+    name: Apache-2.0
+servers:
+  - url: http://localhost:7789
+    description: Local development
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness check
+      operationId: healthz
+      tags: [System]
+      responses:
+        "200":
+          description: Server is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  storage_backend: { type: string }
+
+  /readyz:
+    get:
+      summary: Readiness check with dependency health
+      operationId: readyz
+      tags: [System]
+      responses:
+        "200":
+          description: All dependencies healthy
+        "503":
+          description: One or more dependencies unhealthy
+
+  /api/v1/scans:
+    post:
+      summary: Scan a container image
+      operationId: createScan
+      tags: [Scans]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image_name]
+              properties:
+                image_name: { type: string, example: "nginx:latest" }
+                arch: { type: string }
+                platform: { type: string }
+                registry: { type: string }
+                org_id: { type: string, default: "default" }
+                image_id: { type: string }
+                async: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Synchronous scan completed
+        "202":
+          description: Async scan queued
+        "400":
+          description: Invalid request
+        "429":
+          description: Rate limit exceeded
+
+  /api/v1/scan-jobs/{id}:
+    get:
+      summary: Get scan job status
+      operationId: getScanJob
+      tags: [Scans]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Job status
+        "404":
+          description: Job not found
+
+  /api/v1/catalog:
+    get:
+      summary: List scanned images catalog
+      operationId: listCatalog
+      tags: [Catalog]
+      parameters:
+        - name: query
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: string, enum: [CRITICAL, HIGH, MEDIUM, LOW] }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [recent, critical, packages, name] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 24 }
+      responses:
+        "200":
+          description: Paginated catalog listing
+
+  /api/v1/images/{id}/overview:
+    get:
+      summary: Get image overview
+      operationId: getImageOverview
+      tags: [Images]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: org_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Image overview with metadata and summaries
+        "404":
+          description: Image not found
+
+  /api/v1/images/{id}/vulnerabilities:
+    get:
+      summary: Get image vulnerabilities
+      operationId: getImageVulnerabilities
+      tags: [Images]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: org_id
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Vulnerability records with summaries
+
+  /api/v1/images/{id}/sbom:
+    get:
+      summary: Get image SBOM
+      operationId: getImageSBOM
+      tags: [Images]
+      responses:
+        "200":
+          description: SBOM with packages and dependency tree
+
+  /api/v1/images/{id}/attestations:
+    get:
+      summary: Get image attestations
+      operationId: getImageAttestations
+      tags: [Images]
+      responses:
+        "200":
+          description: Signatures and attestation records
+
+  /api/v1/images/{id}/compliance:
+    get:
+      summary: Get image compliance assessment
+      operationId: getImageCompliance
+      tags: [Images]
+      responses:
+        "200":
+          description: SLSA, Scorecard, and standards compliance
+
+  /api/v1/images/{id}/export:
+    get:
+      summary: Export image scan data
+      operationId: exportImage
+      tags: [Images]
+      parameters:
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [cyclonedx, spdx, json, csv, sarif] }
+      responses:
+        "200":
+          description: Exported scan data
+
+  /api/v1/images/{id}/vex:
+    post:
+      summary: Import VEX document
+      operationId: importVEX
+      tags: [Images]
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200":
+          description: VEX imported successfully
+
+  /api/v1/comparisons:
+    post:
+      summary: Compare two images
+      operationId: createComparison
+      tags: [Comparisons]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [image1, image2]
+              properties:
+                image1: { type: string }
+                image2: { type: string }
+                org1: { type: string }
+                org2: { type: string }
+      responses:
+        "200":
+          description: Comparison results
+
+  /api/v1/registries:
+    get:
+      summary: List configured registries
+      operationId: listRegistries
+      tags: [Admin]
+      responses:
+        "200":
+          description: Registry configurations
+    post:
+      summary: Configure a registry
+      operationId: configureRegistry
+      tags: [Admin]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [registry]
+              properties:
+                registry: { type: string, example: "ghcr.io" }
+                auth_mode: { type: string, enum: [docker_config, explicit] }
+                username: { type: string }
+                password: { type: string }
+                token: { type: string }
+      responses:
+        "200":
+          description: Registry configured
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      operationId: metrics
+      tags: [System]
+      responses:
+        "200":
+          description: Prometheus metrics in text format
