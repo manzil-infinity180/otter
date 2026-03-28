@@ -58,6 +58,8 @@ export function ImageDetailPage() {
   const [queuedTags, setQueuedTags] = useState<Record<string, boolean>>({});
   const [tagSearch, setTagSearch] = useState("");
   const [tagPage, setTagPage] = useState(1);
+  const [pkgSearch, setPkgSearch] = useState("");
+  const [pkgPage, setPkgPage] = useState(1);
 
   const overviewQuery = useQuery({
     queryKey: ["overview", orgId, imageId],
@@ -929,36 +931,86 @@ export function ImageDetailPage() {
                 </div>
                 <div className="grid gap-6 3xl:grid-cols-[1.15fr_0.85fr]">
                   <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
-                    <h3 className="font-display text-lg text-ink-900 dark:text-white">Packages</h3>
-                    <div className="mt-4 max-h-[720px] overflow-auto">
-                      <table className="min-w-[780px] text-left text-sm">
-                        <thead className="text-ink-500 dark:text-ink-400">
-                          <tr>
-                            <th className="pb-3">Name</th>
-                            <th className="pb-3">Version</th>
-                            <th className="pb-3">Type</th>
-                            <th className="pb-3">Licenses</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-ink-200 dark:divide-ink-800">
-                          {sbomQuery.data?.packages.slice(0, 50).map((pkg) => {
-                            const licenses = pkg.licenses?.join(", ") || "Unknown";
-                            return (
-                              <tr key={pkg.id}>
-                                <td className="py-3 text-ink-900 dark:text-white">{pkg.name}</td>
-                                <td className="py-3 text-ink-600 dark:text-ink-300">{pkg.version || "Unknown"}</td>
-                                <td className="py-3 text-ink-600 dark:text-ink-300">{pkg.type || "Unknown"}</td>
-                                <td className="py-3 text-ink-600 dark:text-ink-300">
-                                  <span className="block max-w-[16rem] truncate" title={licenses}>
-                                    {licenses}
-                                  </span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="font-display text-lg text-ink-900 dark:text-white">Packages</h3>
+                      <input
+                        type="text"
+                        placeholder="Search packages…"
+                        value={pkgSearch}
+                        onChange={(e) => { setPkgSearch(e.target.value); setPkgPage(1); }}
+                        className="rounded-md border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-900 placeholder:text-ink-400 dark:border-ink-700 dark:bg-ink-800 dark:text-white dark:placeholder:text-ink-500"
+                      />
                     </div>
+                    {(() => {
+                      const PAGE_SIZE = 50;
+                      const allPackages = sbomQuery.data?.packages ?? [];
+                      const filtered = pkgSearch
+                        ? allPackages.filter((pkg) => pkg.name.toLowerCase().includes(pkgSearch.toLowerCase()))
+                        : allPackages;
+                      const totalPkgPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+                      const safePage = Math.min(pkgPage, totalPkgPages);
+                      const startIdx = (safePage - 1) * PAGE_SIZE;
+                      const pagePackages = filtered.slice(startIdx, startIdx + PAGE_SIZE);
+                      return (
+                        <>
+                          <div className="mt-4 max-h-[720px] overflow-auto">
+                            <table className="min-w-[780px] text-left text-sm">
+                              <thead className="text-ink-500 dark:text-ink-400">
+                                <tr>
+                                  <th className="pb-3">Name</th>
+                                  <th className="pb-3">Version</th>
+                                  <th className="pb-3">Type</th>
+                                  <th className="pb-3">Licenses</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-ink-200 dark:divide-ink-800">
+                                {pagePackages.map((pkg) => {
+                                  const licenses = pkg.licenses?.join(", ") || "Unknown";
+                                  return (
+                                    <tr key={pkg.id}>
+                                      <td className="py-3 text-ink-900 dark:text-white">{pkg.name}</td>
+                                      <td className="py-3 text-ink-600 dark:text-ink-300">{pkg.version || "Unknown"}</td>
+                                      <td className="py-3 text-ink-600 dark:text-ink-300">{pkg.type || "Unknown"}</td>
+                                      <td className="py-3 text-ink-600 dark:text-ink-300">
+                                        <span className="block max-w-[16rem] truncate" title={licenses}>
+                                          {licenses}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-600 dark:text-ink-300">
+                            <p>
+                              Showing {filtered.length ? startIdx + 1 : 0} - {startIdx + pagePackages.length} of {filtered.length} packages
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setPkgPage((p) => Math.max(1, p - 1))}
+                                disabled={safePage === 1}
+                                className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                              >
+                                Previous
+                              </button>
+                              <span className="min-w-[6rem] text-center">
+                                Page {safePage} of {totalPkgPages}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setPkgPage((p) => Math.min(totalPkgPages, p + 1))}
+                                disabled={safePage >= totalPkgPages}
+                                className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                              >
+                                Next
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
                     <h3 className="font-display text-lg text-ink-900 dark:text-white">Dependency tree</h3>
