@@ -58,6 +58,8 @@ export function ImageDetailPage() {
   const [queuedTags, setQueuedTags] = useState<Record<string, boolean>>({});
   const [tagSearch, setTagSearch] = useState("");
   const [tagPage, setTagPage] = useState(1);
+  const [vulnSort, setVulnSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "severity", dir: "desc" });
+  const [copiedCVE, setCopiedCVE] = useState<string | null>(null);
 
   const overviewQuery = useQuery({
     queryKey: ["overview", orgId, imageId],
@@ -156,7 +158,8 @@ export function ImageDetailPage() {
   const hasVulnerabilityFilters = Boolean(searchFilter.trim() || severityFilter || statusFilter);
   const filteredVulnerabilities = useMemo(() => {
     const search = searchFilter.trim().toLowerCase();
-    return vulnerabilityRecords.filter((vulnerability) => {
+    const severityOrder: Record<string, number> = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, NEGLIGIBLE: 1, UNKNOWN: 0 };
+    const filtered = vulnerabilityRecords.filter((vulnerability) => {
       if (severityFilter && vulnerability.severity !== severityFilter) {
         return false;
       }
@@ -177,13 +180,49 @@ export function ImageDetailPage() {
         .toLowerCase()
         .includes(search);
     });
-  }, [searchFilter, severityFilter, statusFilter, vulnerabilityRecords]);
+    return filtered.sort((a, b) => {
+      let cmp = 0;
+      const key = vulnSort.key;
+      if (key === "severity") {
+        cmp = (severityOrder[a.severity] ?? 0) - (severityOrder[b.severity] ?? 0);
+      } else {
+        const aVal = String((a as unknown as Record<string, unknown>)[key] ?? "");
+        const bVal = String((b as unknown as Record<string, unknown>)[key] ?? "");
+        cmp = aVal.localeCompare(bVal);
+      }
+      return vulnSort.dir === "asc" ? cmp : -cmp;
+    });
+  }, [searchFilter, severityFilter, statusFilter, vulnerabilityRecords, vulnSort]);
 
   const dependencyTree = useMemo(() => buildDependencyChildren(sbomQuery.data?.dependency_tree ?? []), [sbomQuery.data?.dependency_tree]);
   const overview = overviewQuery.data;
 
+  useEffect(() => {
+    if (!overview) return;
+    const vulnCount = overview.vulnerability_summary.total;
+    document.title = vulnCount > 0
+      ? `(${vulnCount}) ${overview.image_name} - Otter`
+      : `${overview.image_name} - Otter`;
+    return () => { document.title = "Otter"; };
+  }, [overview]);
+
   if (overviewQuery.isLoading) {
-    return <div className="rounded-xl border border-ink-200 bg-white p-8 dark:border-ink-800 dark:bg-ink-900">Loading image detail...</div>;
+    return (
+      <div className="space-y-6">
+        <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900 sm:p-8">
+          <div className="space-y-4">
+            <div className="h-4 w-24 animate-pulse rounded bg-ink-100 dark:bg-ink-800" />
+            <div className="h-8 w-64 animate-pulse rounded bg-ink-100 dark:bg-ink-800" />
+            <div className="h-4 w-96 animate-pulse rounded bg-ink-100 dark:bg-ink-800" />
+          </div>
+          <div className="mt-6 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-24 animate-pulse rounded-xl border border-ink-200 bg-ink-50 dark:border-ink-800 dark:bg-ink-950" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (overviewQuery.isError || !overview) {
@@ -239,6 +278,21 @@ export function ImageDetailPage() {
                   </span>
                 ))}
               </div>
+              {overview.digest ? (
+                <div className="flex items-center gap-2">
+                  <code className="max-w-md truncate rounded bg-ink-100 px-2 py-0.5 text-xs text-ink-600 dark:bg-ink-800 dark:text-ink-300" title={overview.digest}>
+                    {overview.digest}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => { navigator.clipboard.writeText(overview.digest ?? ""); }}
+                    className="rounded px-1.5 py-0.5 text-xs text-ink-500 hover:bg-ink-100 hover:text-ink-700 dark:text-ink-400 dark:hover:bg-ink-800 dark:hover:text-ink-200"
+                    title="Copy digest"
+                  >
+                    Copy
+                  </button>
+                </div>
+              ) : null}
               {allTags.length > 1 ? (
                 <label className="block max-w-xs space-y-1.5">
                   <span className="text-xs uppercase tracking-wide text-ink-500 dark:text-ink-400">Stored version</span>
@@ -260,10 +314,19 @@ export function ImageDetailPage() {
                 </label>
               ) : null}
             </div>
-            <div className="rounded-lg bg-ink-900 px-4 py-3 text-white dark:bg-white dark:text-ink-900">
-              <p className="text-xs uppercase tracking-wider">Last indexed</p>
-              <p className="mt-1 font-display text-xl">{formatTimestamp(overview.updated_at)}</p>
-              <p className="mt-1 text-sm opacity-75">{overview.org_id} / {overview.image_id}</p>
+            <div className="space-y-3">
+              <div className="rounded-lg bg-ink-900 px-4 py-3 text-white dark:bg-white dark:text-ink-900">
+                <p className="text-xs uppercase tracking-wider">Last indexed</p>
+                <p className="mt-1 font-display text-xl">{formatTimestamp(overview.updated_at)}</p>
+                <p className="mt-1 text-sm opacity-75">{overview.org_id} / {overview.image_id}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { startScan(overview.image_name); }}
+                className="w-full rounded-md border border-ink-200 px-4 py-2 text-sm font-medium text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+              >
+                Scan again
+              </button>
             </div>
           </div>
 
@@ -279,6 +342,19 @@ export function ImageDetailPage() {
               <SeverityPill key={chip.severity} severity={chip.severity} count={chip.count} />
             ))}
           </div>
+          {overview.vulnerability_summary.total > 0 ? (
+            <div className="mt-3">
+              <div className="flex h-3 overflow-hidden rounded-full bg-ink-100 dark:bg-ink-800">
+                {(["CRITICAL", "HIGH", "MEDIUM", "LOW", "NEGLIGIBLE"] as const).map((sev) => {
+                  const count = overview.vulnerability_summary.by_severity[sev] ?? 0;
+                  if (!count) return null;
+                  const pct = (count / overview.vulnerability_summary.total) * 100;
+                  const colors: Record<string, string> = { CRITICAL: "bg-rose-500", HIGH: "bg-amber-500", MEDIUM: "bg-sky-500", LOW: "bg-emerald-500", NEGLIGIBLE: "bg-ink-400" };
+                  return <div key={sev} className={`${colors[sev]} transition-all`} style={{ width: `${pct}%` }} title={`${sev}: ${count} (${pct.toFixed(1)}%)`} />;
+                })}
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[200px_minmax(0,1fr)]">
@@ -291,6 +367,7 @@ export function ImageDetailPage() {
                     key={label}
                     role="tab"
                     aria-selected={active}
+                    aria-label={label}
                     type="button"
                     onClick={() => {
                       startTransition(() => {
@@ -306,7 +383,19 @@ export function ImageDetailPage() {
                         : "text-ink-600 hover:bg-ink-100 hover:text-ink-900 dark:text-ink-300 dark:hover:bg-ink-800 dark:hover:text-white"
                     )}
                   >
-                    {label}
+                    <span className="flex items-center gap-2">
+                      {label}
+                      {label === "Vulnerabilities" && overview.vulnerability_summary.total > 0 ? (
+                        <span className={clsx("rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none", active ? "bg-white/20 dark:bg-ink-900/20" : "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300")}>
+                          {overview.vulnerability_summary.total}
+                        </span>
+                      ) : null}
+                      {label === "SBOM" && overview.package_count > 0 ? (
+                        <span className={clsx("rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none", active ? "bg-white/20 dark:bg-ink-900/20" : "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300")}>
+                          {overview.package_count}
+                        </span>
+                      ) : null}
+                    </span>
                   </button>
                 );
               })}
@@ -839,7 +928,11 @@ export function ImageDetailPage() {
                 ) : null}
 
                 {vulnerabilitiesQuery.isLoading ? (
-                  <p className="mt-6 text-sm text-ink-500 dark:text-ink-400">Loading vulnerabilities...</p>
+                  <div className="mt-6 space-y-3">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="h-12 animate-pulse rounded-md bg-ink-100 dark:bg-ink-800" />
+                    ))}
+                  </div>
                 ) : vulnerabilitiesQuery.isError ? (
                   <EmptyState
                     title="Vulnerabilities unavailable"
@@ -847,15 +940,45 @@ export function ImageDetailPage() {
                   />
                 ) : (
                   <>
-                    <div className="mt-6 overflow-x-auto">
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rows = [["Severity", "CVE ID", "Package", "Version", "Fix Version", "Status"]];
+                          filteredVulnerabilities.forEach((v) => {
+                            rows.push([v.severity, v.id, v.package_name, v.package_version || "", v.fix_version || "", v.status]);
+                          });
+                          const csv = rows.map((r) => r.map((c) => `"${(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+                          const blob = new Blob([csv], { type: "text/csv" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url; a.download = `vulnerabilities-${imageId}.csv`; a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                        className="rounded-md border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-ink-900 hover:text-ink-900 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                      >
+                        Export CSV
+                      </button>
+                    </div>
+                    <div className="mt-2 overflow-x-auto">
                       <table className="min-w-[1120px] text-left text-sm">
                         <thead className="text-ink-500 dark:text-ink-400">
                           <tr>
-                            <th className="pb-4 pr-6">Severity</th>
-                            <th className="pb-4 pr-6">Vulnerability</th>
-                            <th className="pb-4 pr-6">Package</th>
-                            <th className="pb-4 pr-6">Fix version</th>
-                            <th className="pb-4">Status</th>
+                            {[
+                              { key: "severity", label: "Severity" },
+                              { key: "id", label: "Vulnerability" },
+                              { key: "package_name", label: "Package" },
+                              { key: "fix_version", label: "Fix version" },
+                              { key: "status", label: "Status" },
+                            ].map((col) => (
+                              <th
+                                key={col.key}
+                                className={clsx("cursor-pointer select-none pb-4 pr-6 transition hover:text-ink-900 dark:hover:text-white", col.key === "status" && "pr-0")}
+                                onClick={() => setVulnSort((prev) => ({ key: col.key, dir: prev.key === col.key && prev.dir === "asc" ? "desc" : "asc" }))}
+                              >
+                                {col.label} {vulnSort.key === col.key ? (vulnSort.dir === "asc" ? "\u2191" : "\u2193") : ""}
+                              </th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-ink-200 dark:divide-ink-800">
@@ -863,13 +986,21 @@ export function ImageDetailPage() {
                             <tr key={`${vulnerability.id}-${vulnerability.package_name}-${vulnerability.package_version}`}>
                               <td className="py-4 pr-6 align-top"><SeverityPill severity={vulnerability.severity} /></td>
                               <td className="py-4 pr-6 align-top">
-                                <div className="font-medium text-ink-900 dark:text-white">
+                                <div className="flex items-center gap-1.5 font-medium text-ink-900 dark:text-white">
                                   <button
                                     type="button"
                                     onClick={() => setSelectedVulnerability(vulnerability)}
                                     className="text-left transition hover:text-tide"
                                   >
                                     {vulnerability.id}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(vulnerability.id); setCopiedCVE(vulnerability.id); setTimeout(() => setCopiedCVE(null), 1500); }}
+                                    className="rounded px-1 py-0.5 text-[10px] text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:hover:bg-ink-800 dark:hover:text-ink-200"
+                                    title="Copy CVE ID"
+                                  >
+                                    {copiedCVE === vulnerability.id ? "\u2713" : "Copy"}
                                   </button>
                                 </div>
                                 <div className="mt-1 max-w-2xl text-sm leading-6 text-ink-500 dark:text-ink-400">{vulnerability.title || vulnerability.description}</div>

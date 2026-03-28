@@ -20,14 +20,24 @@ function useThemeMode() {
     window.localStorage.setItem("otter-theme", theme);
   }, [theme]);
 
-  return {
-    theme,
-    toggleTheme: () => {
-      startTransition(() => {
-        setTheme((current) => (current === "dark" ? "light" : "dark"));
-      });
-    }
+  const toggleTheme = () => {
+    startTransition(() => {
+      setTheme((current) => (current === "dark" ? "light" : "dark"));
+    });
   };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "D") {
+        e.preventDefault();
+        toggleTheme();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+
+  return { theme, toggleTheme };
 }
 
 function Layout() {
