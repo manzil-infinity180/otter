@@ -9,7 +9,7 @@ func setupScanRoutes(router *gin.Engine, handlers *Handlers, authenticator *auth
 	api := router.Group("/api/v1")
 	api.Use(authenticator.RequireAuthentication())
 	{
-		api.POST("/scans", handlers.ScanHandler.GenerateScanSbomVul)
+		api.POST("/scans", RateLimitScans(), handlers.ScanHandler.GenerateScanSbomVul)
 		api.GET("/scan-jobs/:id", handlers.ScanHandler.GetScanJob)
 		api.GET("/scans/:org_id/:image_id", handlers.ScanHandler.GetImageScans)
 		api.DELETE("/scans/:org_id/:image_id", handlers.ScanHandler.DeleteImageScansHandler)
