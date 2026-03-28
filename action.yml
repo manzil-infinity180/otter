@@ -1,0 +1,65 @@
+name: 'Otter Scan'
+description: 'Scan container images for vulnerabilities using Otter multi-scanner correlation'
+author: 'otter-project'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  image:
+    description: 'Container image to scan (e.g., nginx:latest)'
+    required: true
+  format:
+    description: 'Output format: json, sarif, csv, cyclonedx, spdx'
+    required: false
+    default: 'sarif'
+  fail-on:
+    description: 'Fail if vulnerabilities at or above this severity are found (critical, high, medium, low)'
+    required: false
+    default: ''
+  output:
+    description: 'File path to write scan results'
+    required: false
+    default: 'otter-results.sarif'
+  upload-sarif:
+    description: 'Upload SARIF results to GitHub Code Scanning'
+    required: false
+    default: 'true'
+
+outputs:
+  total-vulnerabilities:
+    description: 'Total number of vulnerabilities found'
+  critical-count:
+    description: 'Number of critical vulnerabilities'
+  high-count:
+    description: 'Number of high vulnerabilities'
+  sarif-file:
+    description: 'Path to the SARIF output file'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Otter
+      shell: bash
+      run: |
+        curl -sSL https://github.com/manzil-infinity180/otter/releases/latest/download/otter-linux-amd64 -o /usr/local/bin/otter
+        chmod +x /usr/local/bin/otter
+
+    - name: Run Otter Scan
+      shell: bash
+      run: |
+        FAIL_FLAG=""
+        if [ -n "${{ inputs.fail-on }}" ]; then
+          FAIL_FLAG="--fail-on ${{ inputs.fail-on }}"
+        fi
+        otter scan "${{ inputs.image }}" \
+          --format "${{ inputs.format }}" \
+          --output "${{ inputs.output }}" \
+          $FAIL_FLAG
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: inputs.upload-sarif == 'true' && inputs.format == 'sarif'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output }}
+        category: otter-scan
