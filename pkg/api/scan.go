@@ -18,6 +18,7 @@ import (
 
 	"github.com/otterXf/otter/pkg/attestation"
 	"github.com/otterXf/otter/pkg/audit"
+	"github.com/otterXf/otter/pkg/metrics"
 	"github.com/otterXf/otter/pkg/catalogscan"
 	"github.com/otterXf/otter/pkg/compare"
 	"github.com/otterXf/otter/pkg/compliance"
@@ -200,8 +201,11 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		return
 	}
 
+	scanStart := time.Now()
 	result, err := h.executeScan(c.Request.Context(), payload)
+	metrics.ScanDuration.Observe(time.Since(scanStart).Seconds())
 	if err != nil {
+		metrics.ScansTotal.WithLabelValues("failed").Inc()
 		h.recordAuditEvent(c.Request.Context(), audit.Event{
 			Action:     "scan.completed",
 			Outcome:    "failed",
@@ -222,6 +226,11 @@ func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
 		})
 		h.renderScanExecutionError(c, err)
 		return
+	}
+	metrics.ScansTotal.WithLabelValues("succeeded").Inc()
+	metrics.ImagesIndexedTotal.Inc()
+	for severity, count := range result.Summary.BySeverity {
+		metrics.VulnerabilitiesTotal.WithLabelValues(severity).Set(float64(count))
 	}
 	h.recordAuditEvent(c.Request.Context(), audit.Event{
 		Action:     "scan.completed",
