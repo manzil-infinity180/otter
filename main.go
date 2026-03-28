@@ -14,8 +14,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/otterXf/otter/pkg/api"
+	_ "github.com/otterXf/otter/pkg/metrics"
 	"github.com/otterXf/otter/pkg/audit"
 	"github.com/otterXf/otter/pkg/auth"
 	otteraws "github.com/otterXf/otter/pkg/aws"
@@ -108,6 +110,8 @@ func main() {
 			"storage_backend": store.Backend(),
 		})
 	})
+
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	routes.SetupRoutes(router, handlers, authenticator)
 
