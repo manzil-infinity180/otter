@@ -9,6 +9,10 @@ inputs:
   image:
     description: 'Container image to scan (e.g., nginx:latest)'
     required: true
+  version:
+    description: 'Version of Otter to install (e.g., v0.1.0). Defaults to latest release.'
+    required: false
+    default: 'latest'
   format:
     description: 'Output format: json, sarif, csv, cyclonedx, spdx'
     required: false
@@ -42,7 +46,15 @@ runs:
     - name: Install Otter
       shell: bash
       run: |
-        curl -sSL https://github.com/manzil-infinity180/otter/releases/latest/download/otter-linux-amd64 -o /usr/local/bin/otter
+        VERSION="${{ inputs.version }}"
+        if [ "$VERSION" = "latest" ]; then
+          VERSION=$(curl -sSL -o /dev/null -w '%{url_effective}' https://github.com/manzil-infinity180/otter/releases/latest | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+[^/]*')
+          if [ -z "$VERSION" ]; then
+            echo "::error::Failed to resolve latest Otter version. Please specify an explicit version using the 'version' input."
+            exit 1
+          fi
+        fi
+        curl -sSL "https://github.com/manzil-infinity180/otter/releases/download/${VERSION}/otter-linux-amd64" -o /usr/local/bin/otter
         chmod +x /usr/local/bin/otter
 
     - name: Run Otter Scan
