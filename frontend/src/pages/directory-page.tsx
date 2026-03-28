@@ -3,6 +3,7 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { EmptyState } from "../components/empty-state";
+import { SecurityFeed } from "../components/security-feed";
 import { SeverityPill } from "../components/severity-pill";
 import { StatCard } from "../components/stat-card";
 import { formatCompactNumber, formatTimestamp, vulnerabilityChips } from "../lib/format";
@@ -146,6 +147,8 @@ export function DirectoryPage() {
           <StatCard label="Critical" value={formatCompactNumber(totals.critical)} detail="Immediate review candidates" />
         </div>
       </section>
+
+      <SecurityFeed />
 
       {scanJobs.length ? (
         <section className="rounded-xl border border-ink-200 bg-white p-5 dark:border-ink-800 dark:bg-ink-900">

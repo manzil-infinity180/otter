@@ -19,6 +19,7 @@ func setupScanRoutes(router *gin.Engine, handlers *Handlers, authenticator *auth
 		api.GET("/comparisons/:id", handlers.ScanHandler.GetStoredComparison)
 		api.GET("/comparisons/:id/export", handlers.ScanHandler.ExportComparison)
 		api.GET("/catalog", handlers.ScanHandler.ListCatalog)
+		api.GET("/security-feed", handlers.ScanHandler.GetSecurityFeed)
 		api.GET("/images/:id/overview", handlers.ScanHandler.GetImageOverview)
 		api.GET("/images/:id/tags", handlers.ScanHandler.GetImageTags)
 		api.GET("/images/:id/compliance", handlers.ScanHandler.GetImageCompliance)

@@ -207,3 +207,21 @@ export function compareImages(params: {
 }) {
   return postJSON<ComparisonResponse>("/api/v1/comparisons", params);
 }
+
+export interface SecurityFeedEntry {
+  id: string;
+  summary: string;
+  severity: string;
+  published: string;
+  packages?: string[];
+  reference?: string;
+}
+
+export interface SecurityFeedResponse {
+  entries: SecurityFeedEntry[];
+  updated_at: string;
+}
+
+export function getSecurityFeed() {
+  return request<SecurityFeedResponse>("/api/v1/security-feed");
+}
