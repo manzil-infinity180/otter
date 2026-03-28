@@ -53,6 +53,8 @@ export function TrendChart({ images }: TrendChartProps) {
                 color: "#fff",
                 fontSize: "12px",
               }}
+              labelStyle={{ color: "#d4d4d8" }}
+              itemStyle={{ color: "#fff" }}
             />
             <Legend wrapperStyle={{ fontSize: "12px" }} />
             {images.map((img) => (

@@ -52,6 +52,8 @@ export function SeverityChart({ data, images }: SeverityChartProps) {
                 color: "#fff",
                 fontSize: "12px",
               }}
+              labelStyle={{ color: "#d4d4d8" }}
+              itemStyle={{ color: "#fff" }}
             />
             {images.map((img) => (
               <Bar

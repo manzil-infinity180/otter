@@ -50,7 +50,7 @@ export function PackageComparison({ images, packages }: PackageComparisonProps) 
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis type="number" tick={{ fontSize: 12 }} />
               <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={180} />
-              <Tooltip contentStyle={{ backgroundColor: "#18181b", border: "1px solid #3f3f46", borderRadius: "8px", color: "#fff", fontSize: "12px" }} />
+              <Tooltip contentStyle={{ backgroundColor: "#18181b", border: "1px solid #3f3f46", borderRadius: "8px", color: "#fff", fontSize: "12px" }} labelStyle={{ color: "#d4d4d8" }} itemStyle={{ color: "#fff" }} />
               <Bar dataKey="packages" radius={[0, 4, 4, 0]} maxBarSize={32}>
                 {countData.map((entry, index) => (
                   <Cell key={index} fill={entry.fill} />
