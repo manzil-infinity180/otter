@@ -10,6 +10,7 @@ import (
 
 	"github.com/otterXf/otter/pkg/multicompare"
 	"github.com/otterXf/otter/pkg/sbomindex"
+	"github.com/otterXf/otter/pkg/storage"
 	"github.com/otterXf/otter/pkg/vulnindex"
 )
 
@@ -45,7 +46,8 @@ func (h *ScanHandler) MultiCompare(c *gin.Context) {
 
 		target, err := h.resolveComparisonTarget(c.Request.Context(), img.Name, orgID, allowedOrgs)
 		if err != nil {
-			if errors.Is(err, sbomindex.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
+			if errors.Is(err, sbomindex.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) ||
+				errors.Is(err, errComparisonTargetNotFound) || errors.Is(err, storage.ErrNotFound) {
 				missing = append(missing, multicompare.ImageTarget{Name: img.Name, OrgID: orgID})
 				continue
 			}
