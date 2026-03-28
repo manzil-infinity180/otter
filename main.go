@@ -109,6 +109,28 @@ func main() {
 		})
 	})
 
+	router.GET("/readyz", func(c *gin.Context) {
+		checks := gin.H{}
+		allHealthy := true
+
+		// Storage check
+		_, err := store.List(c.Request.Context(), "otterxf/")
+		if err != nil {
+			checks["storage"] = gin.H{"status": "unhealthy", "error": err.Error()}
+			allHealthy = false
+		} else {
+			checks["storage"] = gin.H{"status": "healthy"}
+		}
+
+		checks["storage_backend"] = store.Backend()
+
+		if allHealthy {
+			c.JSON(http.StatusOK, gin.H{"status": "ready", "checks": checks})
+		} else {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready", "checks": checks})
+		}
+	})
+
 	routes.SetupRoutes(router, handlers, authenticator)
 
 	server := &http.Server{
