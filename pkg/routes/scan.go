@@ -15,6 +15,8 @@ func setupScanRoutes(router *gin.Engine, handlers *Handlers, authenticator *auth
 		api.DELETE("/scans/:org_id/:image_id", handlers.ScanHandler.DeleteImageScansHandler)
 		api.GET("/scans/:org_id/:image_id/files/:filename", handlers.ScanHandler.DownloadScanFile)
 		api.GET("/compare", handlers.ScanHandler.CompareImages)
+		api.POST("/multi-compare", handlers.ScanHandler.MultiCompare)
+		api.GET("/multi-compare/presets", handlers.ScanHandler.GetMultiComparePresets)
 		api.POST("/comparisons", handlers.ScanHandler.CreateComparison)
 		api.GET("/comparisons/:id", handlers.ScanHandler.GetStoredComparison)
 		api.GET("/comparisons/:id/export", handlers.ScanHandler.ExportComparison)
