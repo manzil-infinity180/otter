@@ -42,6 +42,17 @@ func (h *ScanHandler) MultiCompare(c *gin.Context) {
 		orgID := strings.TrimSpace(img.OrgID)
 
 		target, err := h.resolveComparisonTarget(c.Request.Context(), img.Name, orgID, allowedOrgs)
+		if err != nil && errors.Is(err, errComparisonTargetAmbiguous) && orgID == "" {
+			// Image found in multiple orgs — try common orgs in preference order
+			for _, fallbackOrg := range []string{"default", "catalog"} {
+				t, e := h.resolveComparisonTarget(c.Request.Context(), img.Name, fallbackOrg, allowedOrgs)
+				if e == nil {
+					target = t
+					err = nil
+					break
+				}
+			}
+		}
 		if err != nil {
 			if errors.Is(err, sbomindex.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) ||
 				errors.Is(err, errComparisonTargetNotFound) || errors.Is(err, storage.ErrNotFound) {
