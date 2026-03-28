@@ -19,17 +19,18 @@ type Request struct {
 
 // ImageSnapshot captures all relevant data for a single image in the comparison.
 type ImageSnapshot struct {
-	OrgID         string                `json:"org_id"`
-	ImageID       string                `json:"image_id"`
-	ImageName     string                `json:"image_name"`
-	PackageCount  int                   `json:"package_count"`
-	VulnSummary   VulnSummary           `json:"vulnerability_summary"`
+	OrgID          string                `json:"org_id"`
+	ImageID        string                `json:"image_id"`
+	ImageName      string                `json:"image_name"`
+	PackageCount   int                   `json:"package_count"`
+	EstimatedSize  int64                 `json:"estimated_size"` // bytes, from layer data
+	VulnSummary    VulnSummary           `json:"vulnerability_summary"`
 	LicenseSummary []LicenseSummaryEntry `json:"license_summary,omitempty"`
-	Compliance    *ComplianceSnapshot   `json:"compliance,omitempty"`
-	Trend         []TrendPoint          `json:"trend,omitempty"`
-	Scanners      []string              `json:"scanners,omitempty"`
-	UpdatedAt     time.Time             `json:"updated_at"`
-	Color         string                `json:"color"` // assigned chart color
+	Compliance     *ComplianceSnapshot   `json:"compliance,omitempty"`
+	Trend          []TrendPoint          `json:"trend,omitempty"`
+	Scanners       []string              `json:"scanners,omitempty"`
+	UpdatedAt      time.Time             `json:"updated_at"`
+	Color          string                `json:"color"` // assigned chart color
 }
 
 // VulnSummary is a portable vulnerability summary.
@@ -91,10 +92,28 @@ type SeverityDataPoint struct {
 	Counts   []int  `json:"counts"` // one per image
 }
 
+// VulnOverlapEntry shows which images a specific CVE appears in.
+type VulnOverlapEntry struct {
+	ID          string   `json:"id"`
+	Severity    string   `json:"severity"`
+	PackageName string   `json:"package_name"`
+	InImages    []int    `json:"in_images"` // indices of images containing this CVE
+	ImageNames  []string `json:"image_names"`
+}
+
+// LicenseDataPoint is one bar in the license distribution chart.
+type LicenseDataPoint struct {
+	License    string `json:"license"`
+	Counts     []int  `json:"counts"` // one per image
+	IsCopyleft bool   `json:"is_copyleft"`
+}
+
 // ChartData holds pre-computed data for frontend charts.
 type ChartData struct {
 	SeverityBreakdown []SeverityDataPoint `json:"severity_breakdown"`
 	PackageOverlap    []PackageEntry      `json:"package_overlap"`
+	VulnOverlap       []VulnOverlapEntry  `json:"vuln_overlap"`
+	LicenseBreakdown  []LicenseDataPoint  `json:"license_breakdown"`
 }
 
 // Report is the full multi-image comparison result.

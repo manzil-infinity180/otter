@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import type { MultiCompareImageSnapshot } from "../../lib/api";
-import { formatTimestamp } from "../../lib/format";
+import { formatBytes, formatTimestamp } from "../../lib/format";
 
 interface SummaryCardsProps {
   images: MultiCompareImageSnapshot[];
@@ -65,8 +65,10 @@ export function SummaryCards({ images, winner }: SummaryCardsProps) {
                 <p className="text-[10px] uppercase tracking-wider text-ink-500 dark:text-ink-400">Packages</p>
               </div>
               <div>
-                <p className="font-display text-xl text-ink-900 dark:text-white">{img.vulnerability_summary.fixable}</p>
-                <p className="text-[10px] uppercase tracking-wider text-ink-500 dark:text-ink-400">Fixable</p>
+                <p className="font-display text-xl text-ink-900 dark:text-white">
+                  {img.estimated_size > 0 ? formatBytes(img.estimated_size) : "N/A"}
+                </p>
+                <p className="text-[10px] uppercase tracking-wider text-ink-500 dark:text-ink-400">Image Size</p>
               </div>
             </div>
 

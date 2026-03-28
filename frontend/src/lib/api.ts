@@ -226,6 +226,7 @@ export interface MultiCompareImageSnapshot {
   image_id: string;
   image_name: string;
   package_count: number;
+  estimated_size: number;
   vulnerability_summary: VulnSummary;
   license_summary?: Array<{ license: string; count: number }>;
   compliance?: {
@@ -264,6 +265,20 @@ export interface PairwiseDiff {
   vulns_unchanged: number;
 }
 
+export interface VulnOverlapEntry {
+  id: string;
+  severity: string;
+  package_name: string;
+  in_images: number[];
+  image_names: string[];
+}
+
+export interface LicenseDataPoint {
+  license: string;
+  counts: number[];
+  is_copyleft: boolean;
+}
+
 export interface MultiCompareReport {
   id: string;
   generated_at: string;
@@ -272,6 +287,8 @@ export interface MultiCompareReport {
   chart_data: {
     severity_breakdown: SeverityDataPoint[];
     package_overlap: PackageOverlapEntry[];
+    vuln_overlap: VulnOverlapEntry[];
+    license_breakdown: LicenseDataPoint[];
   };
   winner: number;
 }

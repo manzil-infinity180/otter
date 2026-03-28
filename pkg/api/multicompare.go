@@ -29,6 +29,8 @@ func (h *ScanHandler) MultiCompare(c *gin.Context) {
 	allowedOrgs := authorizedOrgSet(c)
 	sboms := make([]sbomindex.Record, len(req.Images))
 	vulns := make([]vulnindex.Record, len(req.Images))
+	cdxDocs := make([][]byte, len(req.Images))
+	missing := make([]multicompare.ImageTarget, 0)
 
 	for i, img := range req.Images {
 		img.Name = strings.TrimSpace(img.Name)
@@ -44,11 +46,8 @@ func (h *ScanHandler) MultiCompare(c *gin.Context) {
 		target, err := h.resolveComparisonTarget(c.Request.Context(), img.Name, orgID, allowedOrgs)
 		if err != nil {
 			if errors.Is(err, sbomindex.ErrNotFound) || errors.Is(err, vulnindex.ErrNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error":       fmt.Sprintf("image %d (%s) not found in catalog", i+1, img.Name),
-					"remediation": "Scan the image first via POST /api/v1/scans before comparing.",
-				})
-				return
+				missing = append(missing, multicompare.ImageTarget{Name: img.Name, OrgID: orgID})
+				continue
 			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("image %d: %v", i+1, err)})
 			return
@@ -56,11 +55,26 @@ func (h *ScanHandler) MultiCompare(c *gin.Context) {
 
 		sboms[i] = target.SBOM
 		vulns[i] = target.Vulnerabilities
+		cdxDocs[i] = target.CycloneDXDocument
+	}
+
+	if len(missing) > 0 {
+		names := make([]string, len(missing))
+		for i, m := range missing {
+			names[i] = m.Name
+		}
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":          fmt.Sprintf("%d image(s) not found in catalog", len(missing)),
+			"missing_images": missing,
+			"remediation":    "Scan the missing images first, then retry the comparison.",
+		})
+		return
 	}
 
 	report, err := multicompare.BuildReport(multicompare.Inputs{
 		SBOMs:           sboms,
 		Vulnerabilities: vulns,
+		CycloneDXDocs:   cdxDocs,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("build comparison: %v", err)})

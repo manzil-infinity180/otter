@@ -1,21 +1,28 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { ComplianceComparison } from "../components/compare/compliance-comparison";
 import { ExportToolbar } from "../components/compare/export-toolbar";
 import { ImageSelector } from "../components/compare/image-selector";
+import { LicenseChart } from "../components/compare/license-chart";
 import { PackageComparison } from "../components/compare/package-comparison";
 import { SeverityChart } from "../components/compare/severity-chart";
 import { SummaryCards } from "../components/compare/summary-cards";
 import { TrendChart } from "../components/compare/trend-chart";
-import { getMultiComparePresets, multiCompare } from "../lib/api";
-import type { MultiCompareImage, MultiCompareResponse } from "../lib/api";
+import { VulnOverlap } from "../components/compare/vuln-overlap";
+import { getMultiComparePresets, getScanJob, multiCompare, startScan } from "../lib/api";
+import type { MultiCompareImage } from "../lib/api";
+
+interface ScanProgress {
+  imageName: string;
+  jobId: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+}
 
 export function ComparePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [images, setImages] = useState<MultiCompareImage[]>(() => {
-    // Restore from URL params
     const restored: MultiCompareImage[] = [];
     for (let i = 1; i <= 3; i++) {
       const name = searchParams.get(`image${i}`);
@@ -23,6 +30,8 @@ export function ComparePage() {
     }
     return restored;
   });
+  const [scanProgress, setScanProgress] = useState<ScanProgress[]>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const presetsQuery = useQuery({
     queryKey: ["multi-compare-presets"],
@@ -46,6 +55,56 @@ export function ComparePage() {
       compareMutation.mutate(images);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-scan missing images, then retry comparison
+  const handleAutoScan = useCallback(async (missingImageNames: string[]) => {
+    const progress: ScanProgress[] = [];
+    for (const name of missingImageNames) {
+      try {
+        const result = await startScan(name);
+        progress.push({ imageName: name, jobId: result.job.id, status: "pending" });
+      } catch {
+        progress.push({ imageName: name, jobId: "", status: "failed" });
+      }
+    }
+    setScanProgress(progress);
+
+    // Poll scan jobs
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const updated = await Promise.all(
+        progress.map(async (sp) => {
+          if (sp.status === "succeeded" || sp.status === "failed" || !sp.jobId) return sp;
+          try {
+            const job = await getScanJob(sp.jobId);
+            return { ...sp, status: job.job.status as ScanProgress["status"] };
+          } catch {
+            return sp;
+          }
+        })
+      );
+      setScanProgress(updated);
+
+      const allDone = updated.every((sp) => sp.status === "succeeded" || sp.status === "failed");
+      if (allDone) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = null;
+        const allSucceeded = updated.every((sp) => sp.status === "succeeded");
+        if (allSucceeded) {
+          // Retry comparison
+          setTimeout(() => {
+            setScanProgress([]);
+            compareMutation.mutate(images);
+          }, 1000);
+        }
+      }
+    }, 3000);
+  }, [images, compareMutation]);
+
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
   // Update document title
@@ -83,17 +142,31 @@ export function ComparePage() {
         isComparing={compareMutation.isPending}
       />
 
-      {/* Error state */}
-      {compareMutation.isError ? (
-        <div className="rounded-xl border border-rose-300 bg-rose-50 p-5 dark:border-rose-800 dark:bg-rose-950/30">
-          <p className="text-sm font-medium text-rose-900 dark:text-rose-200">Comparison failed</p>
-          <p className="mt-1 text-sm text-rose-700 dark:text-rose-300">
-            {compareMutation.error instanceof Error ? compareMutation.error.message : "An error occurred"}
-          </p>
-          <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">
-            Make sure all images have been scanned first. You can scan them at the directory page.
-          </p>
+      {/* Auto-scan progress */}
+      {scanProgress.length > 0 ? (
+        <div className="rounded-xl border border-sky-300 bg-sky-50 p-5 dark:border-sky-800 dark:bg-sky-950/30">
+          <p className="text-sm font-medium text-sky-900 dark:text-sky-200">Scanning missing images...</p>
+          <p className="mt-1 text-xs text-sky-700 dark:text-sky-300">The comparison will start automatically when all scans complete.</p>
+          <div className="mt-3 space-y-2">
+            {scanProgress.map((sp) => (
+              <div key={sp.jobId} className="flex items-center gap-2 text-sm">
+                <span className={`inline-block h-2 w-2 rounded-full ${sp.status === "succeeded" ? "bg-emerald-500" : sp.status === "failed" ? "bg-rose-500" : "animate-pulse bg-amber-500"}`} />
+                <span className="text-sky-800 dark:text-sky-200">{sp.imageName}</span>
+                <span className="text-xs text-sky-600 dark:text-sky-400">({sp.status})</span>
+              </div>
+            ))}
+          </div>
         </div>
+      ) : null}
+
+      {/* Error state with auto-scan option */}
+      {compareMutation.isError ? (
+        <AutoScanError
+          error={compareMutation.error}
+          onScanAndRetry={(missingImages) => {
+            handleAutoScan(missingImages);
+          }}
+        />
       ) : null}
 
       {/* Loading skeleton */}
@@ -159,13 +232,71 @@ export function ComparePage() {
           {/* Trend chart */}
           <TrendChart images={report.images} />
 
+          {/* Vulnerability overlap */}
+          {report.chart_data.vuln_overlap?.length ? (
+            <VulnOverlap images={report.images} vulns={report.chart_data.vuln_overlap} />
+          ) : null}
+
           {/* Package comparison */}
           <PackageComparison images={report.images} packages={report.chart_data.package_overlap} />
+
+          {/* License comparison */}
+          {report.chart_data.license_breakdown?.length ? (
+            <LicenseChart data={report.chart_data.license_breakdown} images={report.images} />
+          ) : null}
 
           {/* Compliance comparison */}
           <ComplianceComparison images={report.images} />
         </>
       ) : null}
+    </div>
+  );
+}
+
+// Auto-scan error component with "Scan and Retry" button
+function AutoScanError({ error, onScanAndRetry }: { error: unknown; onScanAndRetry: (images: string[]) => void }) {
+  // Try to parse missing_images from error response
+  const [missingImages, setMissingImages] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (error instanceof Error) {
+      try {
+        // The error message may contain JSON with missing_images
+        const match = error.message.match(/not found/);
+        if (match) {
+          // Extract image names from the error — use a heuristic
+          const imgMatch = error.message.match(/\(([^)]+)\)/);
+          if (imgMatch) setMissingImages([imgMatch[1]]);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [error]);
+
+  return (
+    <div className="rounded-xl border border-rose-300 bg-rose-50 p-5 dark:border-rose-800 dark:bg-rose-950/30">
+      <p className="text-sm font-medium text-rose-900 dark:text-rose-200">Comparison failed</p>
+      <p className="mt-1 text-sm text-rose-700 dark:text-rose-300">
+        {error instanceof Error ? error.message : "An error occurred"}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {missingImages.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => onScanAndRetry(missingImages)}
+            className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-700"
+          >
+            Scan missing images and retry
+          </button>
+        ) : null}
+        <Link
+          to="/directory"
+          className="rounded-md border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 dark:border-rose-700 dark:text-rose-300"
+        >
+          Go to Directory to scan images
+        </Link>
+      </div>
     </div>
   );
 }
