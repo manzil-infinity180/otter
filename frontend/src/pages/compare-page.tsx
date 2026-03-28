@@ -163,6 +163,7 @@ export function ComparePage() {
       {compareMutation.isError ? (
         <AutoScanError
           error={compareMutation.error}
+          allImages={images}
           onScanAndRetry={(missingImages) => {
             handleAutoScan(missingImages);
           }}
@@ -254,45 +255,36 @@ export function ComparePage() {
 }
 
 // Auto-scan error component with "Scan and Retry" button
-function AutoScanError({ error, onScanAndRetry }: { error: unknown; onScanAndRetry: (images: string[]) => void }) {
-  // Try to parse missing_images from error response
-  const [missingImages, setMissingImages] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (error instanceof Error) {
-      try {
-        // The error message may contain JSON with missing_images
-        const match = error.message.match(/not found/);
-        if (match) {
-          // Extract image names from the error — use a heuristic
-          const imgMatch = error.message.match(/\(([^)]+)\)/);
-          if (imgMatch) setMissingImages([imgMatch[1]]);
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }, [error]);
+function AutoScanError({ error, allImages, onScanAndRetry }: {
+  error: unknown;
+  allImages: MultiCompareImage[];
+  onScanAndRetry: (images: string[]) => void;
+}) {
+  const errorMsg = error instanceof Error ? error.message : "An error occurred";
+  const isNotFound = errorMsg.includes("not found");
 
   return (
     <div className="rounded-xl border border-rose-300 bg-rose-50 p-5 dark:border-rose-800 dark:bg-rose-950/30">
       <p className="text-sm font-medium text-rose-900 dark:text-rose-200">Comparison failed</p>
-      <p className="mt-1 text-sm text-rose-700 dark:text-rose-300">
-        {error instanceof Error ? error.message : "An error occurred"}
-      </p>
+      <p className="mt-1 text-sm text-rose-700 dark:text-rose-300">{errorMsg}</p>
+      {isNotFound ? (
+        <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">
+          Some images haven't been scanned yet. Click below to scan them — the comparison will start automatically when done.
+        </p>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        {missingImages.length > 0 ? (
+        {isNotFound ? (
           <button
             type="button"
-            onClick={() => onScanAndRetry(missingImages)}
-            className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-700"
+            onClick={() => onScanAndRetry(allImages.map((img) => img.name))}
+            className="rounded-md bg-tide px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-600"
           >
-            Scan missing images and retry
+            Scan all images and retry
           </button>
         ) : null}
         <Link
           to="/directory"
-          className="rounded-md border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 dark:border-rose-700 dark:text-rose-300"
+          className="rounded-md border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 dark:border-rose-700 dark:text-rose-300 dark:hover:bg-rose-950"
         >
           Go to Directory to scan images
         </Link>
