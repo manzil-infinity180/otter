@@ -1,5 +1,6 @@
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { MultiCompareImageSnapshot, SeverityDataPoint } from "../../lib/api";
+import { ChartTooltip } from "./chart-tooltip";
 
 interface SeverityChartProps {
   data: SeverityDataPoint[];
@@ -44,17 +45,7 @@ export function SeverityChart({ data, images }: SeverityChartProps) {
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis dataKey="severity" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#18181b",
-                border: "1px solid #3f3f46",
-                borderRadius: "8px",
-                color: "#fff",
-                fontSize: "12px",
-              }}
-              labelStyle={{ color: "#d4d4d8" }}
-              itemStyle={{ color: "#fff" }}
-            />
+            <Tooltip content={<ChartTooltip />} />
             {images.map((img) => (
               <Bar
                 key={img.image_name}

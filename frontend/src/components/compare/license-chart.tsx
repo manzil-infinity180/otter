@@ -1,5 +1,6 @@
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { MultiCompareImageSnapshot, LicenseDataPoint } from "../../lib/api";
+import { ChartTooltip } from "./chart-tooltip";
 
 interface LicenseChartProps {
   data: LicenseDataPoint[];
@@ -47,17 +48,7 @@ export function LicenseChart({ data, images }: LicenseChartProps) {
               tick={{ fontSize: 11 }}
               width={160}
             />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#18181b",
-                border: "1px solid #3f3f46",
-                borderRadius: "8px",
-                color: "#fff",
-                fontSize: "12px",
-              }}
-              labelStyle={{ color: "#d4d4d8" }}
-              itemStyle={{ color: "#fff" }}
-            />
+            <Tooltip content={<ChartTooltip />} />
             <Legend wrapperStyle={{ fontSize: "12px" }} />
             {images.map((img) => (
               <Bar key={img.image_name} dataKey={img.image_name} fill={img.color} radius={[0, 4, 4, 0]} maxBarSize={20} />

@@ -1,5 +1,6 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { MultiCompareImageSnapshot } from "../../lib/api";
+import { ChartTooltip } from "./chart-tooltip";
 
 interface TrendChartProps {
   images: MultiCompareImageSnapshot[];
@@ -45,17 +46,7 @@ export function TrendChart({ images }: TrendChartProps) {
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis dataKey="date" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#18181b",
-                border: "1px solid #3f3f46",
-                borderRadius: "8px",
-                color: "#fff",
-                fontSize: "12px",
-              }}
-              labelStyle={{ color: "#d4d4d8" }}
-              itemStyle={{ color: "#fff" }}
-            />
+            <Tooltip content={<ChartTooltip />} />
             <Legend wrapperStyle={{ fontSize: "12px" }} />
             {images.map((img) => (
               <Line
