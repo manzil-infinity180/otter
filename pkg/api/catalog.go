@@ -675,40 +675,6 @@ func buildStoredTagListItem(record sbomindex.CatalogRecord) ImageTagListItem {
 	}
 }
 
-func matchesCatalogFilters(entry ImageCatalogEntry, filters catalogFilters) bool {
-	if len(filters.AllowedOrgs) > 0 {
-		if _, ok := filters.AllowedOrgs[entry.OrgID]; !ok {
-			return false
-		}
-	}
-	if filters.OrgID != "" && entry.OrgID != filters.OrgID {
-		return false
-	}
-	if filters.Severity != "" && entry.VulnerabilitySummary.BySeverity[filters.Severity] == 0 {
-		return false
-	}
-	if filters.Query == "" {
-		return true
-	}
-
-	query := strings.ToLower(filters.Query)
-	for _, field := range []string{
-		entry.OrgID,
-		entry.ImageID,
-		entry.ImageName,
-		entry.Repository,
-		entry.RepositoryPath,
-		entry.Tag,
-		entry.Digest,
-	} {
-		if strings.Contains(strings.ToLower(field), query) {
-			return true
-		}
-	}
-
-	return false
-}
-
 func matchesImageTagQuery(item ImageTagListItem, query string) bool {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
@@ -794,42 +760,6 @@ func mergeImageTagItems(existing, candidate ImageTagListItem) ImageTagListItem {
 		merged.VulnerabilitySummary = existing.VulnerabilitySummary
 	}
 	return merged
-}
-
-func sortCatalogEntries(entries []ImageCatalogEntry, sortBy string) {
-	sort.Slice(entries, func(i, j int) bool {
-		left := entries[i]
-		right := entries[j]
-
-		switch sortBy {
-		case "critical":
-			leftCritical := left.VulnerabilitySummary.BySeverity["CRITICAL"]
-			rightCritical := right.VulnerabilitySummary.BySeverity["CRITICAL"]
-			if leftCritical != rightCritical {
-				return leftCritical > rightCritical
-			}
-		case "packages":
-			if left.PackageCount != right.PackageCount {
-				return left.PackageCount > right.PackageCount
-			}
-		case "name":
-			if left.Repository != right.Repository {
-				return left.Repository < right.Repository
-			}
-			return left.ImageName < right.ImageName
-		}
-
-		if left.UpdatedAt.Equal(right.UpdatedAt) {
-			if left.Repository != right.Repository {
-				return left.Repository < right.Repository
-			}
-			if left.OrgID != right.OrgID {
-				return left.OrgID < right.OrgID
-			}
-			return left.ImageID < right.ImageID
-		}
-		return left.UpdatedAt.After(right.UpdatedAt)
-	})
 }
 
 func parseImageReference(imageName string) imageReferenceParts {

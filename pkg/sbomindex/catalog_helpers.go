@@ -1,7 +1,6 @@
 package sbomindex
 
 import (
-	"fmt"
 	"net/url"
 	"sort"
 	"strings"
@@ -23,11 +22,6 @@ type catalogReferenceParts struct {
 	RepositoryPath string
 	Tag            string
 	Digest         string
-}
-
-type vulnerabilityCatalogSummary struct {
-	Summary   map[string]int `json:"summary,omitempty"`
-	UpdatedAt time.Time      `json:"updated_at,omitempty"`
 }
 
 func validateRecordKey(orgID, imageID string) error {
@@ -283,12 +277,4 @@ func catalogPageBounds(query CatalogQuery) (start int, end int) {
 
 func repositoryKeyStoragePath(repositoryKey string) string {
 	return url.PathEscape(strings.TrimSpace(repositoryKey))
-}
-
-func decodeRepositoryKeyStoragePath(value string) (string, error) {
-	decoded, err := url.PathUnescape(value)
-	if err != nil {
-		return "", fmt.Errorf("decode repository key %q: %w", value, err)
-	}
-	return decoded, nil
 }
