@@ -100,7 +100,7 @@ type osvSource struct {
 }
 
 type osvPackage struct {
-	Package         osvPackageInfo    `json:"package"`
+	Package         osvPackageInfo     `json:"package"`
 	Vulnerabilities []osvVulnerability `json:"vulnerabilities"`
 	Groups          []osvGroup         `json:"groups"`
 }
