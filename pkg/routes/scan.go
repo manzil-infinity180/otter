@@ -22,6 +22,7 @@ func setupScanRoutes(router *gin.Engine, handlers *Handlers, authenticator *auth
 		api.GET("/images/:id/overview", handlers.ScanHandler.GetImageOverview)
 		api.GET("/images/:id/tags", handlers.ScanHandler.GetImageTags)
 		api.GET("/images/:id/compliance", handlers.ScanHandler.GetImageCompliance)
+		api.GET("/images/:id/license-compliance", handlers.ScanHandler.GetImageLicenseCompliance)
 		api.GET("/images/:id/export", handlers.ScanHandler.ExportImage)
 		api.GET("/images/:id/sbom", handlers.ScanHandler.GetImageSBOM)
 		api.POST("/images/:id/indexes/repair", handlers.ScanHandler.RepairImageIndexes)

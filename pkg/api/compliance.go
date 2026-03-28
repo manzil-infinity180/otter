@@ -167,3 +167,35 @@ func provenanceMaterials(record attestation.Record) []string {
 	}
 	return append([]string(nil), record.Provenance.Materials...)
 }
+
+func (h *ScanHandler) GetImageLicenseCompliance(c *gin.Context) {
+	orgID, imageID, err := normalizeArtifactIDs(c.Query("org_id"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !authorizeOrgRequest(c, orgID) {
+		return
+	}
+
+	sbomRecord, err := h.sbomIndex.Get(c.Request.Context(), orgID, imageID)
+	if err != nil {
+		if errors.Is(err, sbomindex.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "SBOM not found for this image"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("load SBOM: %v", err)})
+		return
+	}
+
+	policy := compliance.LicensePolicyFromEnv()
+	result := compliance.CheckLicenseCompliance(sbomRecord.Packages, policy)
+
+	c.JSON(http.StatusOK, gin.H{
+		"org_id":          orgID,
+		"image_id":        imageID,
+		"image_name":      sbomRecord.ImageName,
+		"storage_backend": h.store.Backend(),
+		"license_compliance": result,
+	})
+}
