@@ -31,9 +31,10 @@ import (
 )
 
 const (
-	scanTimeout       = 10 * time.Minute
-	maxSBOMUploadSize = 25 << 20
-	maxVEXUploadSize  = 5 << 20
+	scanTimeout        = 10 * time.Minute
+	maxSBOMUploadSize  = 25 << 20
+	maxVEXUploadSize   = 5 << 20
+	maxScanRequestSize = 1 << 20 // 1MB for JSON scan request body
 )
 
 type ImageGeneratePayload struct {
@@ -129,6 +130,7 @@ func (h *ScanHandler) SetJobQueue(queue scanJobQueue) {
 }
 
 func (h *ScanHandler) GenerateScanSbomVul(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxScanRequestSize)
 	var payload ImageGeneratePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

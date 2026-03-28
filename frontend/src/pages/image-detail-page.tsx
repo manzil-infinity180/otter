@@ -58,6 +58,9 @@ export function ImageDetailPage() {
   const [queuedTags, setQueuedTags] = useState<Record<string, boolean>>({});
   const [tagSearch, setTagSearch] = useState("");
   const [tagPage, setTagPage] = useState(1);
+  const [pkgSearch, setPkgSearch] = useState("");
+  const [pkgPage, setPkgPage] = useState(1);
+  const pkgPageSize = 50;
 
   const overviewQuery = useQuery({
     queryKey: ["overview", orgId, imageId],
@@ -180,6 +183,20 @@ export function ImageDetailPage() {
   }, [searchFilter, severityFilter, statusFilter, vulnerabilityRecords]);
 
   const dependencyTree = useMemo(() => buildDependencyChildren(sbomQuery.data?.dependency_tree ?? []), [sbomQuery.data?.dependency_tree]);
+
+  const pkgPagination = useMemo(() => {
+    const allPkgs = sbomQuery.data?.packages ?? [];
+    const filtered = pkgSearch
+      ? allPkgs.filter((p) => p.name.toLowerCase().includes(pkgSearch.toLowerCase()))
+      : allPkgs;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pkgPageSize));
+    const safePage = Math.min(pkgPage, totalPages);
+    const paginated = filtered.slice((safePage - 1) * pkgPageSize, safePage * pkgPageSize);
+    const start = filtered.length ? (safePage - 1) * pkgPageSize + 1 : 0;
+    const end = Math.min(safePage * pkgPageSize, filtered.length);
+    return { filtered, totalPages, safePage, paginated, start, end };
+  }, [sbomQuery.data?.packages, pkgSearch, pkgPage, pkgPageSize]);
+
   const overview = overviewQuery.data;
 
   if (overviewQuery.isLoading) {
@@ -929,7 +946,16 @@ export function ImageDetailPage() {
                 </div>
                 <div className="grid gap-6 3xl:grid-cols-[1.15fr_0.85fr]">
                   <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
-                    <h3 className="font-display text-lg text-ink-900 dark:text-white">Packages</h3>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="font-display text-lg text-ink-900 dark:text-white">Packages</h3>
+                      <input
+                        type="search"
+                        placeholder="Search packages…"
+                        value={pkgSearch}
+                        onChange={(e) => { setPkgSearch(e.target.value); setPkgPage(1); }}
+                        className="rounded-md border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-900 placeholder-ink-400 dark:border-ink-700 dark:bg-ink-800 dark:text-white dark:placeholder-ink-500"
+                      />
+                    </div>
                     <div className="mt-4 max-h-[720px] overflow-auto">
                       <table className="min-w-[780px] text-left text-sm">
                         <thead className="text-ink-500 dark:text-ink-400">
@@ -941,7 +967,7 @@ export function ImageDetailPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-ink-200 dark:divide-ink-800">
-                          {sbomQuery.data?.packages.slice(0, 50).map((pkg) => {
+                          {pkgPagination.paginated.map((pkg) => {
                             const licenses = pkg.licenses?.join(", ") || "Unknown";
                             return (
                               <tr key={pkg.id}>
@@ -959,6 +985,32 @@ export function ImageDetailPage() {
                         </tbody>
                       </table>
                     </div>
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-600 dark:text-ink-300">
+                      <p>
+                        Showing {pkgPagination.start}–{pkgPagination.end} of {pkgPagination.filtered.length} packages
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPkgPage((p) => Math.max(1, p - 1))}
+                          disabled={pkgPagination.safePage === 1}
+                          className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                        >
+                          Previous
+                        </button>
+                        <span className="min-w-[6rem] text-center">
+                          Page {pkgPagination.safePage} of {pkgPagination.totalPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPkgPage((p) => Math.min(pkgPagination.totalPages, p + 1))}
+                          disabled={pkgPagination.safePage >= pkgPagination.totalPages}
+                          className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-900 hover:text-ink-900 disabled:opacity-50 dark:border-ink-700 dark:text-ink-200 dark:hover:border-white dark:hover:text-white"
+                        >
+                          Next
+                        </button>
+                          </div>
+                        </div>
                   </div>
                   <div className="rounded-xl border border-ink-200 bg-white p-6 dark:border-ink-800 dark:bg-ink-900">
                     <h3 className="font-display text-lg text-ink-900 dark:text-white">Dependency tree</h3>
