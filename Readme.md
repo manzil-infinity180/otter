@@ -1,6 +1,21 @@
 # otter
-An open-source SBOM & vulnerability analyzer.
-It scans container images generates CycloneDX SBOMs, lists vulnerabilities
+
+**Otter correlates vulnerability findings from multiple scanners into a single trust decision for container images.**
+
+*One scan. Every scanner. One decision.*
+
+Otter runs Grype, Trivy, and OSV scanners in parallel against container images, then merges their findings into a unified compliance view combining vulnerabilities, SBOMs, attestations, and provenance. Where scanners disagree, that disagreement itself becomes a signal.
+
+### What Otter does
+- **Multi-scanner correlation** — Run multiple vulnerability scanners in parallel and merge their findings
+- **Unified compliance view** — Vulnerabilities + SBOM + attestations + provenance + license compliance in one place
+- **Scanner disagreement analysis** — Surface where scanners disagree as a trust signal
+- **CycloneDX/SPDX SBOM generation** — Generate and index SBOMs via Syft
+- **SARIF/CSV/JSON export** — Push findings to GitHub Code Scanning or any CI tool
+
+### What Otter is NOT
+- Not a replacement for Trivy or Grype — Otter uses them
+- Not a general-purpose vulnerability database
 
 For the project-level implementation summary and future-agent handoff, see
 `AGENT_PROCESS.md`.
