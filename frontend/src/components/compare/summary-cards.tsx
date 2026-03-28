@@ -9,6 +9,7 @@ interface SummaryCardsProps {
 
 export function SummaryCards({ images, winner }: SummaryCardsProps) {
   return (
+    <>
     <div className={clsx("grid gap-4", images.length === 3 ? "lg:grid-cols-3" : "lg:grid-cols-2")}>
       {images.map((img, i) => {
         const isWinner = i === winner;
@@ -85,5 +86,10 @@ export function SummaryCards({ images, winner }: SummaryCardsProps) {
         );
       })}
     </div>
+    <p className="mt-2 text-[11px] leading-relaxed text-ink-400 dark:text-ink-500">
+      Results reflect raw scanner output. Vendor-specific VEX documents may adjust reported counts.
+      Enable Trivy for additional coverage. Import VEX via the image detail page to suppress resolved advisories.
+    </p>
+    </>
   );
 }
