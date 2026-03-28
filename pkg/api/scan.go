@@ -588,17 +588,50 @@ func (h *ScanHandler) executeScan(ctx context.Context, payload ImageGeneratePayl
 
 func (h *ScanHandler) renderScanExecutionError(c *gin.Context, err error) {
 	var policyErr *registry.PolicyError
+	errMsg := err.Error()
 	switch {
 	case errors.As(err, &policyErr):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":       errMsg,
+			"remediation": "Check OTTER_REGISTRY_ALLOWLIST or OTTER_REGISTRY_ALLOW_PRIVATE_NETWORKS settings. Ensure the registry is permitted by egress policy.",
+		})
 	case errors.Is(err, context.DeadlineExceeded):
-		c.JSON(http.StatusGatewayTimeout, gin.H{"error": err.Error()})
-	case strings.Contains(err.Error(), "prepare image pull:"):
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-	case strings.Contains(err.Error(), "invalid image_name"), strings.Contains(err.Error(), "invalid org_id"), strings.Contains(err.Error(), "invalid image_id"), strings.Contains(err.Error(), "registry "):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusGatewayTimeout, gin.H{
+			"error":       errMsg,
+			"remediation": "The scan timed out. Try a smaller image, check network connectivity, or increase the scan timeout.",
+		})
+	case strings.Contains(errMsg, "MANIFEST_UNKNOWN"), strings.Contains(errMsg, "manifest unknown"):
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error":       errMsg,
+			"remediation": "The image tag was not found. Verify the image name and tag are correct.",
+		})
+	case strings.Contains(errMsg, "UNAUTHORIZED"), strings.Contains(errMsg, "unauthorized"):
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error":       errMsg,
+			"remediation": "Authentication failed. Configure registry credentials via POST /api/v1/registries or use a public image.",
+		})
+	case strings.Contains(errMsg, "prepare image pull:"):
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error":       errMsg,
+			"remediation": "Could not reach the registry. Check network connectivity and DNS resolution.",
+		})
+	case strings.Contains(errMsg, "invalid image_name"):
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":       errMsg,
+			"remediation": "Use the format: registry/repository:tag (e.g., docker.io/library/nginx:latest).",
+		})
+	case strings.Contains(errMsg, "invalid org_id"), strings.Contains(errMsg, "invalid image_id"):
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":       errMsg,
+			"remediation": "org_id and image_id must be non-empty alphanumeric strings.",
+		})
+	case strings.Contains(errMsg, "registry "):
+		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":       errMsg,
+			"remediation": "An unexpected error occurred. Check server logs for details.",
+		})
 	}
 }
 
